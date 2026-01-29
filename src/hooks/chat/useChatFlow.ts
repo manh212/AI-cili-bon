@@ -1,0 +1,639 @@
+
+import { useCallback, useState, useRef } from 'react';
+import { useChatStore } from '../../store/chatStore';
+import { useResponseHandler } from './useResponseHandler';
+import { constructChatPrompt, prepareChat } from '../../services/promptManager';
+import { sendChatRequestStream, sendChatRequest } from '../../services/geminiService';
+import { useLorebook } from '../../contexts/LorebookContext';
+import { useChatLogger } from '../useChatLogger';
+import { useWorldSystem } from '../useWorldSystem';
+import { MedusaService, syncDatabaseToLorebook, parseCustomActions, applyMedusaActions } from '../../services/medusaService'; 
+import { getApiKey } from '../../services/settingsService';
+import { useToast } from '../../components/ToastSystem';
+import type { WorldInfoEntry, InteractiveErrorState, ChatMessage } from '../../types';
+import { countTotalTurns } from '../useChatMemory';
+
+export const useChatFlow = () => {
+    const state = useChatStore();
+    const { processAIResponse, createPlaceholderMessage } = useResponseHandler();
+    const { lorebooks } = useLorebook();
+    const logger = useChatLogger();
+    const { scanInput } = useWorldSystem(state.card);
+    const { showToast } = useToast();
+
+    // --- INTERACTIVE ERROR STATE ---
+    const [interactiveError, setInteractiveError] = useState<InteractiveErrorState>({
+        hasError: false,
+        title: '',
+        message: '',
+        canIgnore: true
+    });
+    
+    // Resolver ref để giữ hàm resolve của Promise khi tạm dừng
+    const errorResolverRef = useRef<((decision: 'retry' | 'ignore') => void) | null>(null);
+
+    // --- SOUND NOTIFICATION SYSTEM ---
+    const playNotification = useCallback((type: 'ai' | 'rpg') => {
+        const { visualState } = useChatStore.getState(); // Always get fresh visual state
+        if (visualState.systemSoundEnabled === false) return;
+
+        let soundUrl = '';
+        if (type === 'ai') soundUrl = visualState.aiSoundUrl || '';
+        if (type === 'rpg') soundUrl = visualState.rpgSoundUrl || '';
+
+        if (soundUrl) {
+            const audio = new Audio(soundUrl);
+            audio.volume = 0.5;
+            audio.play().catch(e => console.warn('Sound play error:', e));
+        } else {
+            // Fallback beep
+            try {
+                const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
+                if (!AudioContext) return;
+                const ctx = new AudioContext();
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
+                osc.connect(gain);
+                gain.connect(ctx.destination);
+                
+                if (type === 'ai') {
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(800, ctx.currentTime);
+                    osc.frequency.exponentialRampToValueAtTime(300, ctx.currentTime + 0.1);
+                    gain.gain.setValueAtTime(0.1, ctx.currentTime);
+                    gain.gain.linearRampToValueAtTime(0, ctx.currentTime + 0.1);
+                    osc.start();
+                    osc.stop(ctx.currentTime + 0.1);
+                } else {
+                    osc.type = 'triangle';
+                    osc.frequency.setValueAtTime(1200, ctx.currentTime);
+                    osc.frequency.linearRampToValueAtTime(1800, ctx.currentTime + 0.3);
+                    gain.gain.setValueAtTime(0.05, ctx.currentTime);
+                    gain.gain.linearRampToValueAtTime(0, ctx.currentTime + 0.5);
+                    osc.start();
+                    osc.stop(ctx.currentTime + 0.5);
+                }
+            } catch(e) {}
+        }
+    }, []);
+
+    const waitForUserDecision = useCallback((title: string, message: string, errorDetails: any, canIgnore: boolean = true): Promise<'retry' | 'ignore'> => {
+        return new Promise((resolve) => {
+            const errorStr = errorDetails instanceof Error ? errorDetails.message : String(errorDetails);
+            setInteractiveError({ hasError: true, title, message, errorDetails: errorStr, canIgnore });
+            errorResolverRef.current = resolve;
+        });
+    }, []);
+
+    const handleUserDecision = useCallback((decision: 'retry' | 'ignore') => {
+        setInteractiveError(prev => ({ ...prev, hasError: false }));
+        if (errorResolverRef.current) {
+            errorResolverRef.current(decision);
+            errorResolverRef.current = null;
+        }
+    }, []);
+
+    const stopGeneration = useCallback(() => {
+        // Access fresh state to get the current controller
+        const freshState = useChatStore.getState();
+        if (freshState.abortController) {
+            freshState.abortController.abort();
+            state.setAbortController(null);
+            state.setLoading(false);
+            logger.logSystemMessage('interaction', 'system', 'Người dùng đã dừng quá trình tạo.');
+        }
+    }, [state, logger]);
+
+    // --- MANUAL MYTHIC TRIGGER ---
+    const manualMythicTrigger = useCallback(async () => {
+        // CRITICAL FIX: Use getState() to ensure we work with fresh data (especially after edits/deletes)
+        const freshState = useChatStore.getState();
+
+        if (!freshState.card || !freshState.card.rpg_data) {
+            showToast('Không tìm thấy dữ liệu RPG để xử lý.', 'warning');
+            return;
+        }
+
+        const msgs = freshState.messages;
+        if (msgs.length < 2) {
+            showToast('Lịch sử trò chuyện chưa đủ để phân tích.', 'warning');
+            return;
+        }
+
+        const currentTurn = countTotalTurns(msgs) + 1;
+
+        let lastModelMsg = null;
+        let lastUserMsg = null;
+
+        for (let i = msgs.length - 1; i >= 0; i--) {
+            if (msgs[i].role === 'model') {
+                lastModelMsg = msgs[i];
+                for (let j = i - 1; j >= 0; j--) {
+                    if (msgs[j].role === 'user') {
+                        lastUserMsg = msgs[j];
+                        break;
+                    }
+                }
+                break;
+            }
+        }
+
+        if (!lastModelMsg || !lastUserMsg) {
+            showToast('Không tìm thấy ngữ cảnh hợp lệ (User + AI) để chạy lại RPG.', 'warning');
+            return;
+        }
+
+        const apiKey = getApiKey();
+        if (!apiKey) {
+            showToast('Chưa cấu hình API Key.', 'error');
+            return;
+        }
+
+        logger.logSystemMessage('interaction', 'system', 'Đang buộc chạy lại Mythic Engine...');
+        state.setLoading(true);
+
+        try {
+            const mythicStartTime = Date.now();
+            let historyLog = `User: ${lastUserMsg.content}\nGM/System: ${lastModelMsg.content}`;
+            
+            let allEntries: WorldInfoEntry[] = freshState.card.char_book?.entries || [];
+            lorebooks.forEach(lb => {
+                if (lb.book?.entries) allEntries = [...allEntries, ...lb.book.entries];
+            });
+
+            // For manual trigger, assume no active entries context? Or re-scan?
+            // Let's assume empty active entries for Manual Trigger to avoid complexity.
+            const activeEntries: WorldInfoEntry[] = []; 
+
+            const maxTokens = Number(freshState.preset?.max_tokens) || 16384;
+
+            const medusaResult = await MedusaService.processTurn(
+                historyLog,
+                freshState.card.rpg_data,
+                apiKey,
+                activeEntries,
+                allEntries,
+                'gemini-flash-lite-latest',
+                maxTokens
+            );
+
+            if (medusaResult.debugInfo) {
+                const latency = Date.now() - mythicStartTime;
+                logger.logMythic(medusaResult.debugInfo.prompt, medusaResult.debugInfo.rawResponse, latency);
+            }
+
+            if (medusaResult.success) {
+                const updatedCard = { ...freshState.card, rpg_data: medusaResult.newDb };
+                state.setSessionData({ card: updatedCard });
+                state.updateMessage(lastModelMsg.id, { rpgState: medusaResult.newDb });
+
+                if (medusaResult.logs && medusaResult.logs.length > 0) {
+                    logger.logSystemMessage('script-success', 'system', `[RPG Re-run]:\n${medusaResult.logs.join('\n')}`);
+                }
+                
+                if (medusaResult.notifications && medusaResult.notifications.length > 0) {
+                    const notificationText = medusaResult.notifications.join('\n');
+                    state.setRpgNotification(notificationText);
+                    playNotification('rpg');
+                } else {
+                    state.setRpgNotification(null);
+                }
+
+                // --- LIVE LINK SYNC ---
+                const generatedEntries = syncDatabaseToLorebook(medusaResult.newDb);
+                state.setGeneratedLorebookEntries(generatedEntries);
+                
+                // Update Lifecycle for modified rows
+                const nextRuntime = { ...freshState.worldInfoRuntime };
+                if (medusaResult.rawActions) {
+                    medusaResult.rawActions.forEach(action => {
+                        const table = medusaResult.newDb.tables[action.tableIndex!];
+                        if (!table) return;
+                        
+                        let rowId = action.rowId;
+                        if (!rowId && action.type === 'INSERT' && action.data) {
+                            // Insert auto-handled
+                        } else if (action.type === 'UPDATE' && typeof action.rowIndex === 'number') {
+                            const row = table.data.rows[action.rowIndex];
+                            if (row) {
+                                const rowUuid = row[0];
+                                const uid = `mythic_${table.config.id}_${rowUuid}`;
+                                if (nextRuntime[uid]) {
+                                    nextRuntime[uid] = { ...nextRuntime[uid], lastActiveTurn: currentTurn };
+                                } else {
+                                    nextRuntime[uid] = { stickyDuration: 0, cooldownDuration: 0, lastActiveTurn: currentTurn };
+                                }
+                            }
+                        }
+                    });
+                    state.setSessionData({ worldInfoRuntime: nextRuntime });
+                }
+
+                if (generatedEntries.length > 0) {
+                    const names = generatedEntries.map(e => e.keys[0]).join(', ');
+                    logger.logSystemMessage('state', 'system', `[Live-Link] Đồng bộ ${generatedEntries.length} mục: ${names}`);
+                }
+
+                showToast('Đã cập nhật trạng thái RPG thành công.', 'success');
+            } else {
+                throw new Error('error' in medusaResult ? medusaResult.error : "Unknown RPG Error");
+            }
+
+        } catch (e: any) {
+            logger.logSystemMessage('error', 'system', `Mythic Engine Manual Error: ${e.message}`);
+            showToast(`Lỗi RPG: ${e.message}`, 'error');
+        } finally {
+            state.setLoading(false);
+        }
+
+    }, [state, lorebooks, logger, showToast, playNotification]);
+
+    // --- UNIFIED SEND MESSAGE ---
+    const sendMessage = useCallback(async (text: string, options?: { forcedContent?: string, forceActiveUids?: string[] }) => {
+        // CRITICAL FIX: Always get FRESH state from store directly.
+        const freshState = useChatStore.getState();
+
+        if (!freshState.card || !freshState.preset || !text.trim()) return;
+
+        // Use 'state' for actions (setters are stable), use 'freshState' for reading data
+        state.setError(null);
+        state.setLoading(true);
+        logger.startTurn();
+
+        const ac = new AbortController();
+        state.setAbortController(ac);
+
+        // Calculate Current Turn Index based on FRESH messages
+        const currentTurn = countTotalTurns(freshState.messages) + 1;
+
+        const currentVariablesSnapshot = JSON.parse(JSON.stringify(freshState.variables));
+        const currentRpgSnapshot = freshState.card.rpg_data ? JSON.parse(JSON.stringify(freshState.card.rpg_data)) : undefined;
+        const currentWIRuntimeSnapshot = JSON.parse(JSON.stringify(freshState.worldInfoRuntime));
+        const currentWIStateSnapshot = JSON.parse(JSON.stringify(freshState.worldInfoState));
+        
+        const userMsg: ChatMessage = { 
+            id: `u-${Date.now()}`, 
+            role: 'user' as const, 
+            content: text, 
+            timestamp: Date.now(),
+            contextState: currentVariablesSnapshot,
+            rpgState: currentRpgSnapshot,
+            worldInfoRuntime: currentWIRuntimeSnapshot,
+            worldInfoState: currentWIStateSnapshot
+        };
+        state.addMessage(userMsg);
+
+        try {
+            // 4. Smart Scan (World Info) using FRESH data
+            let scanResult;
+            let retryScan = true;
+            let forceKeywordMode = false;
+
+            const dynamicEntries = freshState.generatedLorebookEntries || [];
+
+            while (retryScan) {
+                try {
+                    const messagesForScan = [...freshState.messages]; 
+                    const recentHistoryText = messagesForScan.slice(-3).map(m => m.content).join('\n');
+                    
+                    const textToScan = options?.forcedContent 
+                        ? `${recentHistoryText}\n${text}\n${options.forcedContent}`
+                        : `${recentHistoryText}\n${text}`;
+                        
+                    const historyList = messagesForScan.map(m => m.content).slice(-3);
+
+                    const isStoryModeChunk = !!options?.forcedContent;
+                    const shouldUseKeywordMode = isStoryModeChunk || forceKeywordMode;
+
+                    const effectivePreset = shouldUseKeywordMode 
+                        ? { ...freshState.preset, smart_scan_mode: 'keyword' as const } 
+                        : freshState.preset;
+
+                    scanResult = await scanInput(
+                        textToScan, 
+                        freshState.worldInfoState, 
+                        freshState.worldInfoRuntime, 
+                        freshState.worldInfoPinned,
+                        effectivePreset,
+                        historyList, 
+                        text, 
+                        freshState.variables,
+                        dynamicEntries,
+                        currentTurn,
+                        options?.forceActiveUids // PASS OVERRIDE UIDS
+                    );
+                    
+                    retryScan = false;
+
+                } catch (e: any) {
+                    logger.logSystemMessage('error', 'system', `Smart Scan Error: ${e.message}`);
+                    const decision = await waitForUserDecision(
+                        "Lỗi Smart Scan (Quét Thông Minh)",
+                        "Hệ thống gặp lỗi khi cố gắng phân tích ngữ cảnh bằng AI. Bạn muốn thử lại hay chuyển sang chế độ quét từ khóa cơ bản?",
+                        e
+                    );
+                    if (decision === 'retry') {
+                        retryScan = true;
+                    } else {
+                        forceKeywordMode = true;
+                        retryScan = true; 
+                    }
+                }
+            }
+            
+            if (!scanResult) {
+                 scanResult = { activeEntries: [], updatedRuntimeState: freshState.worldInfoRuntime };
+            }
+
+            state.setSessionData({ worldInfoRuntime: scanResult.updatedRuntimeState });
+            logger.logWorldInfo(scanResult.activeEntries);
+            if (scanResult.smartScanLog) {
+                logger.logSmartScan(scanResult.smartScanLog.fullPrompt, scanResult.smartScanLog.rawResponse, scanResult.smartScanLog.latency);
+            }
+            
+            // 5. Chuẩn bị Prompt using FRESH data
+            let fullPrompt = "";
+            let generatedRpgSnapshot;
+
+            if (!options?.forcedContent) {
+                const sessionLorebook = { name: "Session Generated", book: { entries: dynamicEntries } };
+                const effectiveLorebooks = [...lorebooks, sessionLorebook];
+
+                const { baseSections } = prepareChat(freshState.card, freshState.preset, effectiveLorebooks, freshState.persona);
+                logger.logPrompt(baseSections); 
+
+                // Note: We append userMsg manually here to the history list from freshState
+                const constructed = await constructChatPrompt(
+                    baseSections, 
+                    [...freshState.messages, userMsg], 
+                    freshState.authorNote,
+                    freshState.card, 
+                    freshState.longTermSummaries, 
+                    freshState.preset.summarization_chunk_size || 10,
+                    freshState.variables, 
+                    freshState.lastStateBlock, 
+                    effectiveLorebooks,
+                    freshState.preset.context_mode || 'standard',
+                    freshState.persona?.name || 'User',
+                    freshState.worldInfoState,
+                    scanResult.activeEntries, 
+                    freshState.worldInfoPlacement,
+                    freshState.preset
+                );
+                fullPrompt = constructed.fullPrompt;
+                generatedRpgSnapshot = constructed.rpgSnapshot;
+                logger.logPrompt(constructed.structuredPrompt); 
+            }
+
+            // 6. Tạo tin nhắn AI (Placeholder)
+            const aiMsg = createPlaceholderMessage('model');
+            aiMsg.rpgState = currentRpgSnapshot;
+            aiMsg.worldInfoRuntime = scanResult.updatedRuntimeState; 
+            
+            // --- FIX: ATTACH SNAPSHOT & ACTIVE UIDS TO MESSAGE ---
+            // Gắn snapshot vào tin nhắn ngay lập tức để dùng cho việc phân tích hành động sau này
+            aiMsg.rpgSnapshot = generatedRpgSnapshot; 
+            // Gắn activeLorebookUids để dùng cho Regeneration
+            aiMsg.activeLorebookUids = scanResult.activeEntries.map(e => e.uid).filter(Boolean) as string[];
+
+            state.addMessage(aiMsg);
+
+            // 7. Thực hiện lấy nội dung
+            let accumulatedText = "";
+            let executionMode = freshState.card.rpg_data?.settings?.executionMode || 'standalone';
+            
+            if (options?.forcedContent) {
+                accumulatedText = options.forcedContent;
+                state.updateMessage(aiMsg.id, { content: accumulatedText });
+                playNotification('ai');
+            } else {
+                const shouldStream = freshState.preset.stream_response; 
+
+                if (shouldStream) {
+                    const stream = sendChatRequestStream(fullPrompt, freshState.preset, ac.signal);
+                    for await (const chunk of stream) {
+                        if (ac.signal.aborted) break;
+                        accumulatedText += chunk;
+                        state.updateMessage(aiMsg.id, { content: accumulatedText + " ▌" });
+                    }
+                } else {
+                    state.updateMessage(aiMsg.id, { content: "..." }); 
+                    const result = await sendChatRequest(fullPrompt, freshState.preset);
+                    if (!ac.signal.aborted) {
+                        accumulatedText = result.response.text || "";
+                        state.updateMessage(aiMsg.id, { content: accumulatedText });
+                    }
+                }
+            }
+
+            // 8. Xử lý hậu kỳ & Mythic Engine
+            if (!ac.signal.aborted) {
+
+                // --- SAFETY VALVE (VAN AN TOÀN) ---
+                const cleanResponse = accumulatedText ? accumulatedText.trim() : "";
+                const wordCount = cleanResponse.split(/\s+/).filter(w => w.length > 0).length;
+
+                if (!cleanResponse || (cleanResponse.length < 100 && wordCount < 10)) {
+                    throw new Error(`Phản hồi AI quá ngắn hoặc rỗng (${cleanResponse.length} ký tự / ${wordCount} từ). Hủy bỏ cập nhật Mythic Engine để bảo vệ dữ liệu.`);
+                }
+                // ----------------------------------
+
+                await processAIResponse(accumulatedText, aiMsg.id);
+                logger.logResponse(accumulatedText);
+                
+                if (!options?.forcedContent) {
+                    playNotification('ai');
+                }
+
+                // Retrieve snapshot FROM THE MESSAGE, NOT global state
+                const snapshotForAction = aiMsg.rpgSnapshot;
+
+                // --- INTEGRATED MODE LOGIC (1-PASS) ---
+                if (freshState.card.rpg_data && executionMode === 'integrated') {
+                    // Pass snapshot to parser
+                    const actions = parseCustomActions(accumulatedText, snapshotForAction);
+                    
+                    if (actions.length > 0) {
+                        logger.logSystemMessage('state', 'system', `[Integrated RPG] Detected ${actions.length} actions.`);
+                        const { newDb, notifications, logs } = applyMedusaActions(freshState.card.rpg_data, actions);
+                        
+                        const updatedCard = { ...freshState.card, rpg_data: newDb };
+                        state.setSessionData({ card: updatedCard });
+                        state.updateMessage(aiMsg.id, { rpgState: newDb });
+                        
+                        if (logs.length > 0) logger.logSystemMessage('script-success', 'system', `[RPG Update]:\n${logs.join('\n')}`);
+                        
+                        if (notifications.length > 0) {
+                            const notificationText = notifications.join('\n');
+                            state.setRpgNotification(notificationText);
+                            playNotification('rpg');
+                        } else {
+                            state.setRpgNotification(null);
+                        }
+                        
+                        const generatedEntries = syncDatabaseToLorebook(newDb);
+                        state.setGeneratedLorebookEntries(generatedEntries);
+                        if (generatedEntries.length > 0) {
+                            logger.logSystemMessage('state', 'system', `[Live-Link] Đồng bộ ${generatedEntries.length} mục.`);
+                        }
+                        
+                        const nextRuntime = { ...freshState.worldInfoRuntime };
+                        if (actions) {
+                             actions.forEach(action => {
+                                 // action.rowId is resolved via snapshot inside parseCustomActions now
+                                 // So we can use it to update lifecycle
+                                 if (action.type === 'UPDATE' && action.rowId && typeof action.tableIndex === 'number') {
+                                    const table = newDb.tables[action.tableIndex];
+                                    if (table) {
+                                        const uid = `mythic_${table.config.id}_${action.rowId}`;
+                                        if (nextRuntime[uid]) {
+                                            nextRuntime[uid] = { ...nextRuntime[uid], lastActiveTurn: currentTurn };
+                                        }
+                                        else nextRuntime[uid] = { stickyDuration: 0, cooldownDuration: 0, lastActiveTurn: currentTurn };
+                                    }
+                                 }
+                             });
+                             state.setSessionData({ worldInfoRuntime: nextRuntime });
+                        }
+
+                    } else {
+                        logger.logSystemMessage('log', 'system', '[Integrated RPG] No actions found in response.');
+                    }
+                }
+                
+                // --- STANDALONE MODE LOGIC (2-PASS / LEGACY) ---
+                else if (freshState.card.rpg_data && executionMode === 'standalone') {
+                    
+                    logger.logSystemMessage('state', 'system', 'Mythic Engine: Đang kích hoạt Medusa (Standalone)...');
+                    const apiKey = getApiKey();
+                    
+                    if (apiKey) {
+                        let retryMedusa = true;
+                        while (retryMedusa) {
+                            try {
+                                const mythicStartTime = Date.now();
+                                let historyLog = `User: ${text}\nGM/System: ${accumulatedText}`;
+                                
+                                if (freshState.messages.length <= 3) {
+                                    const greetingMsg = freshState.messages.find(m => m.role === 'model');
+                                    if (greetingMsg && greetingMsg.content) {
+                                        historyLog = `System (Context/Greeting): ${greetingMsg.content}\n\n${historyLog}`;
+                                    }
+                                }
+                                
+                                let allEntries: WorldInfoEntry[] = freshState.card.char_book?.entries || [];
+                                lorebooks.forEach(lb => {
+                                    if (lb.book?.entries) allEntries = [...allEntries, ...lb.book.entries];
+                                });
+
+                                const dynamicActiveEntries = scanResult.activeEntries.filter(e => !e.constant);
+                                const maxTokens = Number(freshState.preset?.max_tokens) || 16384;
+
+                                const medusaResult = await MedusaService.processTurn(
+                                    historyLog,
+                                    freshState.card.rpg_data,
+                                    apiKey,
+                                    dynamicActiveEntries,
+                                    allEntries,
+                                    'gemini-flash-lite-latest',
+                                    maxTokens
+                                );
+
+                                if (medusaResult.debugInfo) {
+                                    const latency = Date.now() - mythicStartTime;
+                                    logger.logMythic(medusaResult.debugInfo.prompt, medusaResult.debugInfo.rawResponse, latency);
+                                }
+
+                                if (medusaResult.success) {
+                                    // ... (Success handling) ...
+                                    const updatedCard = { ...freshState.card, rpg_data: medusaResult.newDb };
+                                    
+                                    state.setSessionData({ card: updatedCard });
+                                    state.updateMessage(aiMsg.id, { rpgState: medusaResult.newDb });
+                                    
+                                    if (medusaResult.logs && medusaResult.logs.length > 0) {
+                                        logger.logSystemMessage('script-success', 'system', `[RPG Update]:\n${medusaResult.logs.join('\n')}`);
+                                    }
+
+                                    if (medusaResult.notifications && medusaResult.notifications.length > 0) {
+                                        const notificationText = medusaResult.notifications.join('\n');
+                                        state.setRpgNotification(notificationText);
+                                        playNotification('rpg');
+                                    } else {
+                                        state.setRpgNotification(null);
+                                    }
+                                    
+                                    const generatedEntries = syncDatabaseToLorebook(medusaResult.newDb);
+                                    state.setGeneratedLorebookEntries(generatedEntries);
+                                    
+                                    const nextRuntime = { ...freshState.worldInfoRuntime };
+                                    if (medusaResult.rawActions) {
+                                        medusaResult.rawActions.forEach(action => {
+                                            // Standalone Medusa uses rowId mapping internally in processTurn logic
+                                            if (action.type === 'UPDATE' && action.rowId && typeof action.tableIndex === 'number') {
+                                                const table = medusaResult.newDb.tables[action.tableIndex!];
+                                                if (table) {
+                                                    const uid = `mythic_${table.config.id}_${action.rowId}`;
+                                                     if (nextRuntime[uid]) {
+                                                        nextRuntime[uid] = { ...nextRuntime[uid], lastActiveTurn: currentTurn };
+                                                    }
+                                                    else nextRuntime[uid] = { stickyDuration: 0, cooldownDuration: 0, lastActiveTurn: currentTurn };
+                                                }
+                                            }
+                                        });
+                                        state.setSessionData({ worldInfoRuntime: nextRuntime });
+                                    }
+
+                                    if (generatedEntries.length > 0) {
+                                        const names = generatedEntries.map(e => e.keys[0]).join(', ');
+                                        logger.logSystemMessage('state', 'system', `[Live-Link] Đồng bộ ${generatedEntries.length} mục: ${names}`);
+                                    }
+
+                                    retryMedusa = false;
+                                } else {
+                                    throw new Error('error' in medusaResult ? medusaResult.error : "Unknown RPG Error");
+                                }
+
+                            } catch (e: any) {
+                                logger.logSystemMessage('error', 'system', `Mythic Engine Error: ${e.message}`);
+                                const decision = await waitForUserDecision(
+                                    "Lỗi Mythic Engine (RPG)",
+                                    "Hệ thống RPG không thể cập nhật trạng thái thế giới. Bạn muốn thử lại hay bỏ qua?",
+                                    e
+                                );
+                                if (decision === 'retry') {
+                                    retryMedusa = true;
+                                } else {
+                                    retryMedusa = false;
+                                }
+                            }
+                        }
+                    }
+                }
+
+            } else if (!options?.forcedContent && freshState.preset.stream_response) {
+                state.updateMessage(aiMsg.id, { content: accumulatedText });
+            }
+
+        } catch (err: any) {
+            if (err.message !== 'Aborted') {
+                console.error(err);
+                state.setError(`Lỗi: ${err.message}`);
+                state.updateMessage('temp_ai_error', { content: "⚠️ Lỗi: Không thể nhận phản hồi từ AI." });
+                logger.logSystemMessage('api-error', 'api', err.message);
+            }
+        } finally {
+            state.setLoading(false);
+            state.setAbortController(null);
+        }
+    }, [state, lorebooks, createPlaceholderMessage, processAIResponse, logger, scanInput, showToast, waitForUserDecision, playNotification]); 
+
+    return { 
+        sendMessage, 
+        stopGeneration,
+        interactiveError,
+        handleUserDecision,
+        manualMythicTrigger,
+        processAIResponse 
+    };
+};
