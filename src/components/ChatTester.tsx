@@ -16,6 +16,7 @@ import { applyVariableOperation } from '../services/variableEngine';
 import { countTotalTurns } from '../hooks/useChatMemory'; 
 import { ChatOverlayManager } from './Chat/ChatOverlayManager'; 
 import { RpgNotificationOverlay } from './Chat/RpgNotificationOverlay'; // NEW Import
+import { getGlobalContextSettings } from '../services/settingsService'; // NEW Import
 
 interface ChatTesterProps {
     sessionId: string;
@@ -55,9 +56,10 @@ export const ChatTester: React.FC<ChatTesterProps> = ({ sessionId, onBack }) => 
         return reversed.find(m => m.interactiveHtml);
     }, [engine.messages]);
 
-    // FIX: Calculate Active Turn Count (Total Turns - Summarized Turns)
-    const contextDepth = engine.preset?.context_depth || 20;
-    const chunkSize = engine.preset?.summarization_chunk_size || 10;
+    // FIX: Calculate Active Turn Count using GLOBAL SETTINGS to match logic
+    const globalContext = getGlobalContextSettings();
+    const contextDepth = globalContext.context_depth || 24;
+    const chunkSize = globalContext.summarization_chunk_size || 12;
     
     const activeTurnCount = useMemo(() => {
         const totalTurns = countTotalTurns(engine.messages);
@@ -217,7 +219,7 @@ export const ChatTester: React.FC<ChatTesterProps> = ({ sessionId, onBack }) => 
                     isImmersive={ui.isImmersive}
                     onLorebookCreatorOpen={() => ui.setIsLorebookCreatorOpen(true)}
                     summaryStats={{
-                        messageCount: activeTurnCount, // FIX: Pass Active Turns instead of Total
+                        messageCount: activeTurnCount, // FIX: Pass Active Turns calculated from Global Settings
                         summaryCount: engine.longTermSummaries.length,
                         contextDepth: contextDepth,
                         chunkSize: chunkSize,

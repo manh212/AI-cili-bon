@@ -5,8 +5,6 @@ import type { SillyTavernPreset } from '../types';
 import { parsePresetFile } from '../services/presetParser';
 import * as dbService from '../services/dbService';
 import defaultPreset from '../data/defaultPreset';
-import geminiCoT12kPreset from '../data/geminiCoT12kPreset';
-import tawaPreset from '../data/tawaPreset';
 
 interface PresetState {
   presets: SillyTavernPreset[];
@@ -40,20 +38,10 @@ export const usePresetStore = create<PresetState & PresetActions>()(
         let presets = await dbService.getAllPresets();
         let needsSave = false;
 
-        // Ensure defaults exist
+        // Ensure default exists
         if (!presets.some(p => p.name === defaultPreset.name)) {
           await dbService.savePreset(defaultPreset);
           presets.unshift(defaultPreset);
-          needsSave = true;
-        }
-        if (!presets.some(p => p.name === geminiCoT12kPreset.name)) {
-          await dbService.savePreset(geminiCoT12kPreset);
-          presets.push(geminiCoT12kPreset);
-          needsSave = true;
-        }
-        if (!presets.some(p => p.name === tawaPreset.name)) {
-          await dbService.savePreset(tawaPreset);
-          presets.push(tawaPreset);
           needsSave = true;
         }
 
@@ -78,12 +66,7 @@ export const usePresetStore = create<PresetState & PresetActions>()(
       try {
         const loadedPreset = await parsePresetFile(file);
         const { presets } = get();
-        const existing = presets.find(p => p.name === loadedPreset.name);
         
-        if (existing) {
-             // Overwrite existing logic or handle conflict
-        }
-
         await dbService.savePreset(loadedPreset);
         const allPresets = await dbService.getAllPresets();
         
@@ -99,8 +82,6 @@ export const usePresetStore = create<PresetState & PresetActions>()(
     deleteActivePreset: async () => {
         const { activePresetName } = get();
         if (!activePresetName) return;
-        // Optional: Protect default presets? 
-        // if (activePresetName === defaultPreset.name || activePresetName === geminiCoT12kPreset.name) return;
 
         try {
             await dbService.deletePreset(activePresetName);
@@ -138,16 +119,6 @@ export const usePresetStore = create<PresetState & PresetActions>()(
             if (activePresetName === defaultPreset.name) {
                 await dbService.savePreset(defaultPreset);
                 get().updateActivePreset(defaultPreset);
-                return;
-            }
-            if (activePresetName === geminiCoT12kPreset.name) {
-                await dbService.savePreset(geminiCoT12kPreset);
-                get().updateActivePreset(geminiCoT12kPreset);
-                return;
-            }
-            if (activePresetName === tawaPreset.name) {
-                await dbService.savePreset(tawaPreset);
-                get().updateActivePreset(tawaPreset);
                 return;
             }
             
@@ -206,8 +177,7 @@ export const usePresetStore = create<PresetState & PresetActions>()(
             const newPreset = JSON.parse(JSON.stringify(defaultPreset));
             newPreset.name = name;
             newPreset.comment = "Preset mới được tạo.";
-            newPreset.prompts = []; // Empty or keep defaults? Let's keep empty for fresh start or defaults? Keeping defaults is safer for user.
-            // Actually let's use the defaultPreset's prompts so it's usable immediately
+            // Use default prompts to make it immediately usable
             
             await dbService.savePreset(newPreset);
             

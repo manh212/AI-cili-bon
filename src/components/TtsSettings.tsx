@@ -1,18 +1,15 @@
 
 import React, { useState, useEffect } from 'react';
-import type { SillyTavernPreset } from '../types';
 import { AVAILABLE_VOICES, playTextToSpeech, playNativeTts, getVietnameseVoices } from '../services/ttsService';
 import { useToast } from './ToastSystem';
 import { ToggleInput } from './ui/ToggleInput';
 import { SelectInput } from './ui/SelectInput';
 import { SliderInput } from './ui/SliderInput';
+import { useTTS } from '../contexts/TTSContext';
+import { GlobalTTSSettings } from '../services/settingsService';
 
-interface TtsSettingsProps {
-    preset: SillyTavernPreset;
-    onUpdate: (updatedPreset: SillyTavernPreset) => void;
-}
-
-export const TtsSettings: React.FC<TtsSettingsProps> = ({ preset, onUpdate }) => {
+export const TtsSettings: React.FC = () => {
+    const { settings, updateSettings } = useTTS();
     const { showToast } = useToast();
     const [isTesting, setIsTesting] = useState(false);
     const [nativeVoices, setNativeVoices] = useState<SpeechSynthesisVoice[]>([]);
@@ -32,8 +29,8 @@ export const TtsSettings: React.FC<TtsSettingsProps> = ({ preset, onUpdate }) =>
         }
     }, []);
 
-    const handleUpdate = (key: keyof SillyTavernPreset, value: any) => {
-        onUpdate({ ...preset, [key]: value });
+    const handleUpdate = (key: keyof GlobalTTSSettings, value: any) => {
+        updateSettings({ ...settings, [key]: value });
     };
 
     const handleTestVoice = async () => {
@@ -41,15 +38,15 @@ export const TtsSettings: React.FC<TtsSettingsProps> = ({ preset, onUpdate }) =>
         setIsTesting(true);
         try {
             const text = "Xin chào, đây là giọng đọc thử nghiệm. Hệ thống âm thanh đang hoạt động tốt.";
-            const provider = preset.tts_provider || 'gemini';
+            const provider = settings.tts_provider || 'gemini';
 
             if (provider === 'gemini') {
-                const voice = preset.tts_voice || 'Kore';
+                const voice = settings.tts_voice || 'Kore';
                 await playTextToSpeech(text, voice);
             } else {
-                const voiceUri = preset.tts_native_voice || '';
-                const rate = preset.tts_rate || 1;
-                const pitch = preset.tts_pitch || 1;
+                const voiceUri = settings.tts_native_voice || '';
+                const rate = settings.tts_rate || 1;
+                const pitch = settings.tts_pitch || 1;
                 
                 // Wrap native play in promise for test button state logic
                 await new Promise<void>((resolve) => {
@@ -64,29 +61,27 @@ export const TtsSettings: React.FC<TtsSettingsProps> = ({ preset, onUpdate }) =>
         }
     };
 
-    const isNative = preset.tts_provider === 'native';
+    const isNative = settings.tts_provider === 'native';
 
     return (
         <div className="space-y-6">
-            <h3 className="text-xl font-bold text-amber-400 mb-4">Hệ thống Giọng nói (TTS)</h3>
-
             <ToggleInput 
-                label="Bật Text-to-Speech (TTS)"
-                checked={preset.tts_enabled ?? false}
+                label="Bật Text-to-Speech (TTS) Toàn Cục"
+                checked={settings.tts_enabled ?? false}
                 onChange={(v) => handleUpdate('tts_enabled', v)}
             />
 
-            <div className={`space-y-6 transition-opacity duration-300 ${!preset.tts_enabled ? 'opacity-50 pointer-events-none' : ''}`}>
+            <div className={`space-y-6 transition-opacity duration-300 ${!settings.tts_enabled ? 'opacity-50 pointer-events-none' : ''}`}>
                 
                 <ToggleInput
                     label="Chế độ Đọc Streaming (Real-time)"
-                    checked={preset.tts_streaming ?? false}
+                    checked={settings.tts_streaming ?? false}
                     onChange={(v) => handleUpdate('tts_streaming', v)}
                 />
 
                 <SelectInput 
                     label="Nguồn Giọng Đọc (Provider)"
-                    value={preset.tts_provider || 'gemini'}
+                    value={settings.tts_provider || 'gemini'}
                     onChange={(e) => handleUpdate('tts_provider', e.target.value)}
                     options={[
                         { value: 'gemini', label: 'Gemini AI (Cloud)' },
@@ -101,20 +96,20 @@ export const TtsSettings: React.FC<TtsSettingsProps> = ({ preset, onUpdate }) =>
                         ) : (
                             <SelectInput 
                                 label="Giọng Đọc Trình Duyệt"
-                                value={preset.tts_native_voice || (nativeVoices[0]?.voiceURI || '')}
+                                value={settings.tts_native_voice || (nativeVoices[0]?.voiceURI || '')}
                                 onChange={(e) => handleUpdate('tts_native_voice', e.target.value)}
                                 options={nativeVoices.map(v => ({ value: v.voiceURI, label: v.name }))}
                             />
                         )}
                         <SliderInput 
                             label="Tốc độ (Rate)"
-                            value={preset.tts_rate ?? 1}
+                            value={settings.tts_rate ?? 1}
                             onChange={(v) => handleUpdate('tts_rate', v)}
                             min={0.1} max={2} step={0.1}
                         />
                         <SliderInput 
                             label="Cao độ (Pitch)"
-                            value={preset.tts_pitch ?? 1}
+                            value={settings.tts_pitch ?? 1}
                             onChange={(v) => handleUpdate('tts_pitch', v)}
                             min={0} max={2} step={0.1}
                         />
@@ -123,7 +118,7 @@ export const TtsSettings: React.FC<TtsSettingsProps> = ({ preset, onUpdate }) =>
                     <div className="space-y-4 border-l-2 border-slate-600 pl-4">
                         <SelectInput 
                             label="Giọng đọc Gemini"
-                            value={preset.tts_voice || 'Kore'}
+                            value={settings.tts_voice || 'Kore'}
                             onChange={(e) => handleUpdate('tts_voice', e.target.value)}
                             options={AVAILABLE_VOICES.map(v => ({ value: v.id, label: v.name }))}
                         />

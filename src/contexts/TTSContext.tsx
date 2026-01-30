@@ -2,6 +2,7 @@
 import React, { createContext, useContext, useState, useRef, useEffect, useCallback } from 'react';
 import { fetchTtsBuffer, playNativeTts } from '../services/ttsService';
 import { useToast } from '../components/ToastSystem';
+import { GlobalTTSSettings, getGlobalTTSSettings, saveGlobalTTSSettings } from '../services/settingsService';
 
 // Options passed when queuing speech
 interface TTSOptions {
@@ -14,11 +15,7 @@ interface QueueItem {
     id: string;
     text: string;
     voice: string;
-    // THAY ĐỔI QUAN TRỌNG: Lưu trữ Promise thay vì chỉ text.
-    // Điều này có nghĩa là việc tải xuống bắt đầu NGAY LẬP TỨC khi item được tạo.
-    // Với Native TTS, biến này sẽ là undefined.
     audioPromise?: Promise<AudioBuffer>;
-    // New fields for Native support
     provider: 'gemini' | 'native';
     rate: number;
     pitch: number;
@@ -32,6 +29,10 @@ interface TTSContextType {
     currentPlayingId: string | null;
     isLoading: boolean;
     
+    // Settings State
+    settings: GlobalTTSSettings;
+    updateSettings: (newSettings: GlobalTTSSettings) => void;
+    
     addToQueue: (text: string, voice: string, id?: string, options?: TTSOptions) => void;
     playImmediately: (text: string, voice: string, id?: string, options?: TTSOptions) => void;
     toggleAutoPlay: () => void;
@@ -44,6 +45,14 @@ interface TTSContextType {
 const TTSContext = createContext<TTSContextType | undefined>(undefined);
 
 export const TTSProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+    // --- Global Settings State ---
+    const [settings, setSettings] = useState<GlobalTTSSettings>(getGlobalTTSSettings());
+
+    const updateSettings = useCallback((newSettings: GlobalTTSSettings) => {
+        setSettings(newSettings);
+        saveGlobalTTSSettings(newSettings);
+    }, []);
+
     const [queue, setQueue] = useState<QueueItem[]>([]);
     const [isPlaying, setIsPlaying] = useState(false);
     const [isPaused, setIsPaused] = useState(false);
@@ -103,10 +112,6 @@ export const TTSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             try {
                 if (nextItem.provider === 'native') {
                     // --- NATIVE HANDLING ---
-                    // No buffer fetching needed. Play directly.
-                    // IMPORTANT: playNativeTts is synchronous in setup but asynchronous in execution.
-                    // We need to manage state via callbacks.
-                    
                     setIsPlaying(true);
                     setCurrentPlayingId(nextItem.id);
                     setIsLoading(false); // Native loads instantly
@@ -159,30 +164,34 @@ export const TTSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     // Public Actions
 
-    const addToQueue = useCallback((text: string, voice: string, id: string = `msg-${Date.now()}`, options: TTSOptions = {}) => {
-        const provider = options.provider || 'gemini';
+    const addToQueue = useCallback((text: string, voice?: string, id: string = `msg-${Date.now()}`, options: TTSOptions = {}) => {
+        // Fallback to Global Settings if not provided
+        const provider = options.provider || settings.tts_provider;
+        const voiceToUse = voice || (provider === 'native' ? settings.tts_native_voice : settings.tts_voice);
+        const rate = options.rate !== undefined ? options.rate : settings.tts_rate;
+        const pitch = options.pitch !== undefined ? options.pitch : settings.tts_pitch;
         
         let audioPromise: Promise<AudioBuffer> | undefined;
 
         // PRE-FETCHING: Gọi API ngay lập tức tại thời điểm thêm vào hàng đợi (chỉ với Gemini)
         if (provider === 'gemini') {
-            audioPromise = fetchTtsBuffer(text, voice);
+            audioPromise = fetchTtsBuffer(text, voiceToUse);
         }
         
         const newItem: QueueItem = { 
             id, 
             text, 
-            voice,
+            voice: voiceToUse,
             audioPromise,
             provider,
-            rate: options.rate || 1,
-            pitch: options.pitch || 1
+            rate,
+            pitch
         };
         
         setQueue(prev => [...prev, newItem]);
-    }, []);
+    }, [settings]);
 
-    const playImmediately = useCallback(async (text: string, voice: string, id: string = `now-${Date.now()}`, options: TTSOptions = {}) => {
+    const playImmediately = useCallback(async (text: string, voice?: string, id: string = `now-${Date.now()}`, options: TTSOptions = {}) => {
         // 1. Clear Queue
         setQueue([]);
         
@@ -196,32 +205,23 @@ export const TTSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setIsPlaying(false);
         setIsPaused(false);
         
-        // 3. Add to queue (it will be picked up immediately by the effect)
-        addToQueue(text, voice, id, options);
+        // 4. Add to queue (it will be picked up immediately by the effect)
+        // Note: voice and options will default inside addToQueue if undefined
+        addToQueue(text, voice!, id, options);
     }, [addToQueue]);
 
     const togglePause = useCallback(async () => {
         const ctx = await getContext();
         
-        // Logic depends on what is currently playing or queued (check currentPlayingId)
-        // Since we don't store which provider is currently playing in a separate state, 
-        // we check both systems.
-        
         if (isPaused) {
             // RESUME
-            // Resume Context (Gemini)
             if (ctx.state === 'suspended') await ctx.resume();
-            // Resume Native
             if (window.speechSynthesis.paused) window.speechSynthesis.resume();
-            
             setIsPaused(false);
         } else {
             // PAUSE
-            // Pause Context (Gemini)
             if (ctx.state === 'running') await ctx.suspend();
-            // Pause Native
             if (window.speechSynthesis.speaking) window.speechSynthesis.pause();
-            
             setIsPaused(true);
         }
     }, [getContext, isPaused]);
@@ -230,13 +230,11 @@ export const TTSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         // Skip Native
         if (window.speechSynthesis.speaking || window.speechSynthesis.pending) {
             window.speechSynthesis.cancel();
-            // Canceling native triggers 'onend', which handles queue shifting
         }
         
         // Skip Buffer
         if (activeSourceRef.current) {
             try { activeSourceRef.current.stop(); } catch(e) {}
-            // onended will trigger
         } else {
             // If loading
             if (isLoading && queue.length > 0) {
@@ -252,15 +250,10 @@ export const TTSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     const stopAll = useCallback(() => {
         setQueue([]);
-        
-        // Stop Native
         window.speechSynthesis.cancel();
-        
-        // Stop Buffer
         if (activeSourceRef.current) {
             try { activeSourceRef.current.stop(); } catch(e) {}
         }
-        
         setIsPlaying(false);
         setIsPaused(false);
         setIsLoading(false);
@@ -278,6 +271,8 @@ export const TTSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             queue,
             currentPlayingId,
             isLoading,
+            settings,
+            updateSettings,
             addToQueue,
             playImmediately,
             toggleAutoPlay,

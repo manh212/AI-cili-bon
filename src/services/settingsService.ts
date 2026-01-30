@@ -8,7 +8,9 @@ const PROXY_PASSWORD_KEY = 'sillyTavernStudio_proxyPassword';
 const PROXY_LEGACY_MODE_KEY = 'sillyTavernStudio_proxyLegacyMode';
 const PROXY_FOR_TOOLS_KEY = 'sillyTavernStudio_proxyForTools';
 const GLOBAL_CONNECTION_KEY = 'sillyTavernStudio_globalConnection';
-const GLOBAL_SMART_SCAN_KEY = 'sillyTavernStudio_smartScanGlobal'; // NEW KEY
+const GLOBAL_SMART_SCAN_KEY = 'sillyTavernStudio_smartScanGlobal';
+const GLOBAL_CONTEXT_KEY = 'sillyTavernStudio_globalContext';
+const GLOBAL_TTS_KEY = 'sillyTavernStudio_ttsGlobal'; // NEW KEY
 
 // ... (Existing options and interfaces remain same) ...
 export const MODEL_OPTIONS = [
@@ -39,7 +41,7 @@ export interface GlobalConnectionSettings {
     proxy_protocol: ProxyProtocol; // NEW: Protocol selection
 }
 
-// NEW INTERFACE: Global Smart Scan Configuration
+// Global Smart Scan Configuration
 export interface GlobalSmartScanSettings {
     enabled: boolean;
     mode: 'keyword' | 'hybrid' | 'ai_only';
@@ -48,7 +50,26 @@ export interface GlobalSmartScanSettings {
     max_entries: number;
     aiStickyDuration: number;
     system_prompt: string;
-    scan_strategy: 'efficient' | 'full'; // NEW FIELD
+    scan_strategy: 'efficient' | 'full'; 
+}
+
+// Global Context & Memory Settings
+export interface GlobalContextSettings {
+    context_depth: number;
+    summarization_chunk_size: number;
+    context_mode: 'standard' | 'ai_only';
+    summarization_prompt: string;
+}
+
+// NEW: Global TTS Settings
+export interface GlobalTTSSettings {
+    tts_enabled: boolean;
+    tts_streaming: boolean;
+    tts_provider: 'gemini' | 'native';
+    tts_voice: string; // Gemini voice name
+    tts_native_voice: string; // Browser voice URI
+    tts_rate: number;
+    tts_pitch: number;
 }
 
 const DEFAULT_CONNECTION_SETTINGS: GlobalConnectionSettings = {
@@ -141,6 +162,52 @@ Hãy viết suy nghĩ của bạn vào _thought theo cấu trúc tư duy của m
 
 { "_thought": "1. [Phân tích]: User đang [Hành động] trong không khí [Không khí]. 2. [Dự đoán N+3]: Hành động này dễ dẫn tới [Sự kiện X], cần chuẩn bị trước [WI A, WI B]. 3. [Môi trường & Gieo mầm]: Xung quanh có [WI C - Âm thanh/NPC], đồng thời gieo thêm [WI D - Tin đồn xa] để tạo biến số.", "selected_ids": ["id_direct", "id_prediction", "id_atmosphere", "id_seeding_lore"] }`;
 
+// Default Chronicle Scribe Prompt
+export const DEFAULT_CONTEXT_PROMPT = `Vai trò: Bạn là một Thư ký Biên niên sử Tận tụy (Dedicated Chronicle Scribe). Nhiệm vụ của bạn là ghi chép lại lịch sử của thế giới này một cách chi tiết, sống động và liền mạch.
+
+Nhiệm vụ: Hãy biến dữ liệu từ đoạn hội thoại dưới đây thành một chương biên niên sử hoàn chỉnh. Không tóm tắt, hãy tường thuật chi tiết từng nhịp độ của câu chuyện.
+
+
+PHẦN 1: BỐI CẢNH ĐÃ BIẾT (CHỈ THAM KHẢO, KHÔNG viết LẠI):
+{{recent_summaries}}
+
+ phần 2, DỮ LIỆU CẦN XỬ LÝ:
+
+{{chat_history_slice}}
+
+YÊU CẦU VỀ PHONG CÁCH VÀ CẤU TRÚC:
+
+Cấu trúc nối tiếp (Linear Narrative):
+
+Trình bày mọi việc theo trình tự thời gian nghiêm ngặt. Sự kiện này dẫn đến sự kiện kia.
+
+Mỗi phân đoạn phải là một khối thông tin đầy đủ: Bối cảnh -> Hành động của nhân vật -> Phản ứng của môi trường/NPC -> Kết quả.
+
+Loại bỏ hoàn toàn bảng biểu và danh mục tách biệt:
+
+KHÔNG tạo các mục như "Kho đồ", "Chỉ số", hay "Mối quan hệ" ở cuối bài.
+
+Lồng ghép trực tiếp: Ví dụ: Thay vì ghi "Vật phẩm: Kiếm sắt", hãy viết: "Sau cuộc trò chuyện, người thợ rèn đã trao cho bạn một thanh kiếm sắt nặng trịch, sự tin tưởng trong mắt ông ta rõ ràng đã tăng lên so với lúc đầu."
+
+Mọi sự thay đổi về chỉ số (máu, mana, tiền), trang bị, hay thái độ của NPC phải được mô tả như một phần tự nhiên của lời kể.
+
+Tính chi tiết và Liên tục:
+
+Ghi lại các đoạn hội thoại quan trọng bằng cách lồng vào văn cảnh (có thể dùng trích dẫn trực tiếp trong đoạn văn).
+
+Chú trọng vào cử chỉ, ánh mắt, không khí và sự thay đổi nội tâm của các nhân vật.
+
+"Sử dụng góc nhìn thứ ba toàn tri (Third-person omniscient) để miêu tả hành động và nội tâm nhân vật, nhưng giữ giọng văn điềm tĩnh, không phán xét của một người ghi chép sử sách." tuyệt đối không được tự ý bình luận vào trong  biên niên sử, không dùng gạch đầu dòng khô khan.
+
+Nguyên tắc "Thà thừa còn hơn thiếu":
+
+Không lược bỏ bất kỳ chi tiết nhỏ nào (vật trang trí, thời tiết, cảm giác của nhân vật).
+
+Đảm bảo người đọc có thể nắm bắt được toàn bộ trạng thái nhân vật và thế giới chỉ thông qua việc đọc nội dung văn bản.
+YÊU CẦU:
+Hãy viết tiếp diễn biến câu chuyện dựa trên PHẦN 1, nhưng chỉ  tổng hợp các sự kiện nằm trong PHẦN 2.
+Đảm bảo bản  biên niên sử mới nối tiếp mạch lạc với bối cảnh cũ.`;
+
 export const DEFAULT_SMART_SCAN_SETTINGS: GlobalSmartScanSettings = {
     enabled: true,
     mode: 'ai_only', // Default to advanced mode
@@ -150,6 +217,24 @@ export const DEFAULT_SMART_SCAN_SETTINGS: GlobalSmartScanSettings = {
     aiStickyDuration: 5,
     system_prompt: DEFAULT_SMART_SCAN_PROMPT,
     scan_strategy: 'efficient' // Default to truncation logic
+};
+
+export const DEFAULT_GLOBAL_CONTEXT_SETTINGS: GlobalContextSettings = {
+    context_depth: 12, // Default: 12 turns (Requested)
+    summarization_chunk_size: 6, // Default: 6 turns per chunk (Requested)
+    context_mode: 'ai_only', // Default: AI Only mode for summaries
+    summarization_prompt: DEFAULT_CONTEXT_PROMPT
+};
+
+// NEW: Default TTS Settings
+export const DEFAULT_GLOBAL_TTS_SETTINGS: GlobalTTSSettings = {
+    tts_enabled: false,
+    tts_streaming: false,
+    tts_provider: 'gemini',
+    tts_voice: 'Kore',
+    tts_native_voice: '',
+    tts_rate: 1,
+    tts_pitch: 1
 };
 
 
@@ -177,13 +262,12 @@ export const saveConnectionSettings = (settings: GlobalConnectionSettings): void
     localStorage.setItem(GLOBAL_CONNECTION_KEY, JSON.stringify(settings));
 };
 
-// --- NEW GLOBAL SMART SCAN SETTINGS ---
+// --- GLOBAL SMART SCAN SETTINGS ---
 export const getGlobalSmartScanSettings = (): GlobalSmartScanSettings => {
     try {
         const stored = localStorage.getItem(GLOBAL_SMART_SCAN_KEY);
         if (stored) {
             const parsed = JSON.parse(stored);
-            // Merge with defaults to ensure new fields are present during migration
             return { ...DEFAULT_SMART_SCAN_SETTINGS, ...parsed };
         }
     } catch (e) {
@@ -195,7 +279,43 @@ export const getGlobalSmartScanSettings = (): GlobalSmartScanSettings => {
 export const saveGlobalSmartScanSettings = (settings: GlobalSmartScanSettings): void => {
     localStorage.setItem(GLOBAL_SMART_SCAN_KEY, JSON.stringify(settings));
 };
-// --------------------------------------
+
+// --- GLOBAL CONTEXT SETTINGS ---
+export const getGlobalContextSettings = (): GlobalContextSettings => {
+    try {
+        const stored = localStorage.getItem(GLOBAL_CONTEXT_KEY);
+        if (stored) {
+            const parsed = JSON.parse(stored);
+            return { ...DEFAULT_GLOBAL_CONTEXT_SETTINGS, ...parsed };
+        }
+    } catch (e) {
+        console.error("Failed to load global context settings", e);
+    }
+    return DEFAULT_GLOBAL_CONTEXT_SETTINGS;
+};
+
+export const saveGlobalContextSettings = (settings: GlobalContextSettings): void => {
+    localStorage.setItem(GLOBAL_CONTEXT_KEY, JSON.stringify(settings));
+};
+
+// --- NEW GLOBAL TTS SETTINGS ---
+export const getGlobalTTSSettings = (): GlobalTTSSettings => {
+    try {
+        const stored = localStorage.getItem(GLOBAL_TTS_KEY);
+        if (stored) {
+            const parsed = JSON.parse(stored);
+            return { ...DEFAULT_GLOBAL_TTS_SETTINGS, ...parsed };
+        }
+    } catch (e) {
+        console.error("Failed to load global TTS settings", e);
+    }
+    return DEFAULT_GLOBAL_TTS_SETTINGS;
+};
+
+export const saveGlobalTTSSettings = (settings: GlobalTTSSettings): void => {
+    localStorage.setItem(GLOBAL_TTS_KEY, JSON.stringify(settings));
+};
+// -----------------------------------
 
 export const getActiveModel = (): string => {
     const conn = getConnectionSettings();
@@ -310,7 +430,7 @@ export const getAllLocalStorageData = (): Record<string, any> => {
         ACTIVE_MODEL_KEY, API_SETTINGS_KEY, API_KEY_INDEX_KEY, 
         OPENROUTER_API_KEY_KEY, PROXY_URL_KEY, PROXY_PASSWORD_KEY, 
         PROXY_LEGACY_MODE_KEY, PROXY_FOR_TOOLS_KEY, GLOBAL_CONNECTION_KEY,
-        GLOBAL_SMART_SCAN_KEY // Include new key in backup
+        GLOBAL_SMART_SCAN_KEY, GLOBAL_CONTEXT_KEY, GLOBAL_TTS_KEY // Include new TTS key
     ];
     
     keys.forEach(key => {

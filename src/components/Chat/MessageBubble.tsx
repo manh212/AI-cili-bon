@@ -4,9 +4,8 @@ import type { ChatMessage } from '../../types';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 import { useUserPersona } from '../../contexts/UserPersonaContext';
-import { usePreset } from '../../contexts/PresetContext'; // Import Preset Context
 import { useToast } from '../ToastSystem';
-import { useTTS } from '../../contexts/TTSContext'; // NEW Import
+import { useTTS } from '../../contexts/TTSContext';
 
 export interface MessageMenuAction {
     label: string;
@@ -82,7 +81,6 @@ export const MessageMenu: React.FC<{
     );
 };
 
-// New component to display hidden thoughts
 export const ThinkingReveal: React.FC<{ content: string; label?: string }> = ({ content, label = 'Quy trình suy nghĩ' }) => {
     const [isOpen, setIsOpen] = useState(false);
 
@@ -137,47 +135,37 @@ const MessageBubbleComponent: React.FC<MessageBubbleProps> = ({
     isImmersive 
 }) => {
     const { activePersona } = useUserPersona();
-    const { activePresetName, presets } = usePreset();
     const { showToast } = useToast();
     const isUser = message.role === 'user';
     const isSystem = message.role === 'system';
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     
     // TTS Context Usage
-    const { playImmediately, currentPlayingId, isLoading } = useTTS();
+    const { playImmediately, currentPlayingId, settings: ttsSettings } = useTTS();
     const isPlayingThis = currentPlayingId === message.id;
 
-    // Get Active Preset settings for TTS
-    const activePreset = presets.find(p => p.name === activePresetName);
-    const ttsEnabled = activePreset?.tts_enabled === true;
-    const ttsVoice = activePreset?.tts_voice || 'Kore';
-    const ttsProvider = activePreset?.tts_provider || 'gemini';
-    const ttsNativeVoice = activePreset?.tts_native_voice || '';
-    const ttsRate = activePreset?.tts_rate ?? 1;
-    const ttsPitch = activePreset?.tts_pitch ?? 1;
+    // Use Global Settings for TTS
+    const ttsEnabled = ttsSettings.tts_enabled;
+    const ttsVoice = ttsSettings.tts_voice || 'Kore';
+    const ttsProvider = ttsSettings.tts_provider || 'gemini';
+    const ttsNativeVoice = ttsSettings.tts_native_voice || '';
+    const ttsRate = ttsSettings.tts_rate ?? 1;
+    const ttsPitch = ttsSettings.tts_pitch ?? 1;
 
     const { mainHtml, thinkingBlocks } = useMemo(() => {
         if (isUser || !message.content) {
             return { mainHtml: '', thinkingBlocks: [] };
         }
 
-        // Replace display macros for the UI
         let contentToRender = message.content;
         if (activePersona) {
             contentToRender = contentToRender.replace(/{{user}}/gi, activePersona.name);
         }
 
         const foundThinkingBlocks: { label: string; content: string }[] = [];
-
-        // Regex to capture various thinking tags including custom ones from CoT cards
-        // Captures: <thinking>, <thinking_requirements>, <step_outline>, <plan>
         const thinkingRegex = /<(thinking|thinking_requirements|step_outline|plan)>([\s\S]*?)<\/\1>/gi;
         
         let match;
-        // Reset lastIndex because we are running in a loop if we used 'exec' on a global regex variable, 
-        // but string.matchAll or loop replace is safer.
-        
-        // We use a loop to extract all blocks and remove them from main content
         let extractedContent = contentToRender;
         while ((match = thinkingRegex.exec(contentToRender)) !== null) {
             const tagName = match[1];
@@ -189,15 +177,13 @@ const MessageBubbleComponent: React.FC<MessageBubbleProps> = ({
             if (tagName === 'plan') label = 'Kế hoạch';
 
             foundThinkingBlocks.push({ label, content: innerContent });
-            
-            // Remove from main content
             extractedContent = extractedContent.replace(match[0], '');
         }
 
         const rawHtml = marked.parse(extractedContent.trim()) as string;
         const sanitized = DOMPurify.sanitize(rawHtml, { 
             ADD_TAGS: ['style', 'details', 'summary'],
-            ADD_ATTR: ['style', 'class', 'open'] // Allow styling attributes for custom regex blocks like Night Sky
+            ADD_ATTR: ['style', 'class', 'open']
         });
         
         return { mainHtml: sanitized, thinkingBlocks: foundThinkingBlocks };
@@ -325,7 +311,6 @@ const MessageBubbleComponent: React.FC<MessageBubbleProps> = ({
     );
 };
 
-// Hàm so sánh menuActions (tránh re-render khi function reference thay đổi nhưng giá trị không đổi)
 const compareMenuActions = (prev: MessageMenuAction[], next: MessageMenuAction[]) => {
     if (prev.length !== next.length) return false;
     for (let i = 0; i < prev.length; i++) {
@@ -336,8 +321,6 @@ const compareMenuActions = (prev: MessageMenuAction[], next: MessageMenuAction[]
     return true;
 };
 
-// MEMOIZATION
-// Chỉ re-render khi nội dung hoặc trạng thái nút menu thay đổi
 export const MessageBubble = memo(MessageBubbleComponent, (prev, next) => {
     return (
         prev.message.content === next.message.content &&
@@ -347,6 +330,6 @@ export const MessageBubble = memo(MessageBubbleComponent, (prev, next) => {
         prev.editingContent === next.editingContent &&
         prev.avatarUrl === next.avatarUrl &&
         prev.isImmersive === next.isImmersive &&
-        compareMenuActions(prev.menuActions, next.menuActions) // SO SÁNH MENU ĐỂ CẬP NHẬT TRẠNG THÁI NÚT
+        compareMenuActions(prev.menuActions, next.menuActions)
     );
 });

@@ -8,7 +8,7 @@ import { useLorebook } from '../../contexts/LorebookContext';
 import { useChatLogger } from '../useChatLogger';
 import { useWorldSystem } from '../useWorldSystem';
 import { MedusaService, syncDatabaseToLorebook, parseCustomActions, applyMedusaActions } from '../../services/medusaService'; 
-import { getApiKey } from '../../services/settingsService';
+import { getApiKey, getGlobalContextSettings } from '../../services/settingsService';
 import { useToast } from '../../components/ToastSystem';
 import type { WorldInfoEntry, InteractiveErrorState, ChatMessage } from '../../types';
 import { countTotalTurns } from '../useChatMemory';
@@ -362,6 +362,10 @@ export const useChatFlow = () => {
                 const { baseSections } = prepareChat(freshState.card, freshState.preset, effectiveLorebooks, freshState.persona);
                 logger.logPrompt(baseSections); 
 
+                // FIX: Get Global Context Settings for Chunk Size
+                const globalContext = getGlobalContextSettings();
+                const chunkSize = globalContext.summarization_chunk_size || 12;
+
                 // Note: We append userMsg manually here to the history list from freshState
                 const constructed = await constructChatPrompt(
                     baseSections, 
@@ -369,7 +373,7 @@ export const useChatFlow = () => {
                     freshState.authorNote,
                     freshState.card, 
                     freshState.longTermSummaries, 
-                    freshState.preset.summarization_chunk_size || 10,
+                    chunkSize, // Pass Global Chunk Size
                     freshState.variables, 
                     freshState.lastStateBlock, 
                     effectiveLorebooks,

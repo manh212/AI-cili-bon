@@ -11,7 +11,7 @@ interface ChatHeaderProps {
     isImmersive: boolean;
     setIsImmersive: (value: boolean) => void;
     visualState: VisualState;
-    onVisualUpdate: (type: string, value: any) => void; // Updated signature to accept string key
+    onVisualUpdate: (type: string, value: any) => void; 
     onToggleHUD?: () => void;
     isHUDOpen?: boolean;
     onToggleStatusHUD?: () => void;
@@ -20,7 +20,6 @@ interface ChatHeaderProps {
     onPresetChange?: (presetName: string) => void;
     onToggleAssistant?: () => void;
     isAssistantOpen?: boolean;
-    // NEW: RPG Dashboard
     onToggleRpgDashboard?: () => void;
     isRpgDashboardOpen?: boolean;
     hasRpgData?: boolean;
@@ -32,6 +31,9 @@ const VisualSettingsModal: React.FC<{
     visualState: VisualState;
     onUpdate: (type: string, value: any) => void;
 }> = ({ isOpen, onClose, visualState, onUpdate }) => {
+    // ... (Existing Modal Code - No changes needed here)
+    // For brevity, assuming the VisualSettingsModal code is preserved exactly as is
+    // ...
     const modalRef = useRef<HTMLDivElement>(null);
     const closeButtonRef = useRef<HTMLButtonElement>(null);
 
@@ -228,10 +230,8 @@ const PresetTuningModal: React.FC<{
 
 // --- TTS Controls Component ---
 const TTSControls: React.FC = () => {
-    const { isPlaying, isPaused, autoPlayEnabled, toggleAutoPlay, togglePause, skip, isLoading } = useTTS();
-    const { activePresetName, presets } = usePreset();
-    const activePreset = presets.find(p => p.name === activePresetName);
-    const ttsEnabled = activePreset?.tts_enabled === true;
+    const { isPlaying, isPaused, autoPlayEnabled, toggleAutoPlay, togglePause, skip, isLoading, settings } = useTTS();
+    const ttsEnabled = settings.tts_enabled; // Use Global Settings
 
     if (!ttsEnabled) return null;
 
@@ -287,7 +287,7 @@ const TTSControls: React.FC = () => {
     );
 };
 
-// --- Model Badge Component ---
+// ... (Rest of ChatHeader unchanged) ...
 const ModelBadge: React.FC = () => {
     const conn = getConnectionSettings();
     const activeModel = getActiveModel();
@@ -349,7 +349,6 @@ export const ChatHeader: React.FC<ChatHeaderProps> = ({
             <div className="flex-grow min-w-0 flex flex-col justify-center">
                 <div className="flex items-center gap-2">
                     <h2 className="text-lg font-bold text-slate-200 truncate">{characterName}</h2>
-                    {/* Model Badge added here */}
                     {!isImmersive && <ModelBadge />}
                 </div>
                 <div className="flex items-center gap-2">
@@ -361,7 +360,9 @@ export const ChatHeader: React.FC<ChatHeaderProps> = ({
             {/* TTS Controls (NEW) */}
             <TTSControls />
 
-            {/* RPG Dashboard Toggle (NEW - Only show if card has RPG data) */}
+            {/* Other Toggles (Status, HUD, RPG, Assistant, Tuning) ... Same as before ... */}
+            
+            {/* RPG Dashboard Toggle */}
             {hasRpgData && onToggleRpgDashboard && (
                 <button
                     onClick={onToggleRpgDashboard}
@@ -376,7 +377,7 @@ export const ChatHeader: React.FC<ChatHeaderProps> = ({
                 </button>
             )}
 
-            {/* Assistant Toggle (NEW) */}
+            {/* Assistant Toggle */}
             {onToggleAssistant && (
                 <button
                     onClick={onToggleAssistant}
@@ -422,7 +423,7 @@ export const ChatHeader: React.FC<ChatHeaderProps> = ({
                 </button>
             )}
 
-            {/* Live Tuning Toggle (NEW) */}
+            {/* Live Tuning Toggle */}
             {onPresetChange && (
                 <div className="relative">
                     <button

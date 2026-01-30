@@ -4,16 +4,15 @@ import type { ChatMessage, TavernHelperScript } from '../../types';
 import { InteractiveHtmlMessage } from '../InteractiveHtmlMessage';
 import { MessageBubble, ThinkingReveal, MessageMenu } from './MessageBubble';
 import { Loader } from '../Loader';
-import { usePreset } from '../../contexts/PresetContext';
+import { usePreset } from '../../contexts/PresetContext'; // Still needed for other preset stuff
 import { useToast } from '../ToastSystem';
 import { cleanMessageContent } from '../../services/promptManager';
-import { useTTS } from '../../contexts/TTSContext'; // NEW Import
+import { useTTS } from '../../contexts/TTSContext';
 
 // --- Standalone TTS Button for Interactive Messages ---
 const StandaloneTTSButton: React.FC<{ 
     rawContent: string; 
     voice: string;
-    // New Props for Native TTS
     provider: 'gemini' | 'native';
     rate: number;
     pitch: number;
@@ -32,7 +31,7 @@ const StandaloneTTSButton: React.FC<{
         }
 
         try {
-            // Pass full options object
+            // Use props passed from Global Settings
             const usedVoice = provider === 'native' ? nativeVoice : voice;
             playImmediately(cleanText, usedVoice, `interactive-${Date.now()}`, {
                 provider,
@@ -81,14 +80,14 @@ interface MessageListProps {
     // Actions
     regenerateLastResponse: () => void;
     deleteLastTurn: () => void;
-    onDeleteMessage: (messageId: string) => void; // NEW: Specific Message Deletion
+    onDeleteMessage: (messageId: string) => void;
     onOpenAuthorNote: () => void;
     onOpenWorldInfo: () => void;
     
     // Data
     scripts: TavernHelperScript[];
-    variables: any; // For initial data in interactive cards
-    extensionSettings: any; // NEW
+    variables: any;
+    extensionSettings: any;
     
     // Refs
     iframeRefs: React.MutableRefObject<Record<string, HTMLIFrameElement | null>>;
@@ -126,16 +125,14 @@ const MessageListComponent: React.FC<MessageListProps> = ({
     const prevMessagesLengthRef = useRef(messages.length);
     const lastMessageIdRef = useRef<string | null>(messages.length > 0 ? messages[messages.length - 1].id : null);
     
-    const { activePresetName, presets } = usePreset();
-    const activePreset = presets.find(p => p.name === activePresetName);
-    
-    // Extract TTS Settings
-    const ttsEnabled = activePreset?.tts_enabled === true;
-    const ttsVoice = activePreset?.tts_voice || 'Kore';
-    const ttsProvider = activePreset?.tts_provider || 'gemini';
-    const ttsNativeVoice = activePreset?.tts_native_voice || '';
-    const ttsRate = activePreset?.tts_rate ?? 1;
-    const ttsPitch = activePreset?.tts_pitch ?? 1;
+    // Load Global TTS Settings
+    const { settings: ttsSettings } = useTTS();
+    const ttsEnabled = ttsSettings.tts_enabled;
+    const ttsVoice = ttsSettings.tts_voice || 'Kore';
+    const ttsProvider = ttsSettings.tts_provider || 'gemini';
+    const ttsNativeVoice = ttsSettings.tts_native_voice || '';
+    const ttsRate = ttsSettings.tts_rate ?? 1;
+    const ttsPitch = ttsSettings.tts_pitch ?? 1;
     
     // --- LOAD MORE LOGIC ---
     const [visibleCount, setVisibleCount] = useState(10); 
@@ -208,18 +205,13 @@ const MessageListComponent: React.FC<MessageListProps> = ({
             )}
 
             {displayedMessages.map((msg, index) => {
-                // Calculate absolute index in the full 'messages' array
-                // displayedMessages is a slice from the end.
-                // Start index of display = total length - displayed length
                 const startIndex = messages.length - displayedMessages.length;
                 const originalIndex = startIndex + index;
                 
                 const isLastMessage = originalIndex === lastMessageIndex;
                 const isLastModelMessage = originalIndex === lastModelMsgIndex;
                 
-                // Allow regenerate if it's the Last Model Message OR the Last Message (even if User)
                 const canRegenerate = !isLoading && msg.role !== 'system' && (isLastModelMessage || isLastMessage);
-                
                 const canDelete = !isLoading;
 
                 const menuActions = [

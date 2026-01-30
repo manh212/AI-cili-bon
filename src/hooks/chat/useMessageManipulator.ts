@@ -5,6 +5,7 @@ import { parseLooseJson } from '../../utils';
 import { useChatStore } from '../../store/chatStore';
 import { syncDatabaseToLorebook } from '../../services/medusaService';
 import { countTotalTurns } from '../useChatMemory';
+import { getGlobalContextSettings } from '../../services/settingsService'; // NEW Import
 
 interface MessageManipulatorProps {
     saveSession: (data: any) => Promise<void>;
@@ -135,29 +136,29 @@ export const useMessageManipulator = ({
         // Mục tiêu: Khôi phục ngữ cảnh raw tối đa. Nếu số lượt hiện tại < Ngưỡng, xóa sạch tóm tắt.
         let updatedSummaries = state.longTermSummaries;
 
-        if (mergedSettings) {
-            const contextDepth = mergedSettings.context_depth || 24;
-            const chunkSize = mergedSettings.summarization_chunk_size || 10;
-            
-            // Đếm số lượt thực tế còn lại
-            const newTotalTurns = countTotalTurns(newMessages);
+        // Use Global Settings instead of Merged Settings for Context Logic
+        const globalContext = getGlobalContextSettings();
+        const contextDepth = globalContext.context_depth || 24;
+        const chunkSize = globalContext.summarization_chunk_size || 12;
+        
+        // Đếm số lượt thực tế còn lại
+        const newTotalTurns = countTotalTurns(newMessages);
 
-            // Công thức: Cần giữ lại bao nhiêu gói tóm tắt để (Số lượt còn lại - Số lượt đã tóm tắt) <= contextDepth?
-            // neededSummaries = ceil( (Total - Depth) / Chunk )
-            // Ví dụ: Total=20, Depth=24 -> (20-24)/10 = -0.4 -> 0 gói (Xóa hết).
-            // Ví dụ: Total=40, Depth=24, Chunk=10 -> (40-24)/10 = 1.6 -> 2 gói.
-            //    -> 2 gói tóm tắt 20 lượt. Còn lại 20 lượt raw. 20 <= 24. OK.
-            
-            const neededSummariesCount = Math.max(0, Math.ceil((newTotalTurns - contextDepth) / chunkSize));
+        // Công thức: Cần giữ lại bao nhiêu gói tóm tắt để (Số lượt còn lại - Số lượt đã tóm tắt) <= contextDepth?
+        // neededSummaries = ceil( (Total - Depth) / Chunk )
+        // Ví dụ: Total=20, Depth=24 -> (20-24)/10 = -0.4 -> 0 gói (Xóa hết).
+        // Ví dụ: Total=40, Depth=24, Chunk=10 -> (40-24)/10 = 1.6 -> 2 gói.
+        //    -> 2 gói tóm tắt 20 lượt. Còn lại 20 lượt raw. 20 <= 24. OK.
+        
+        const neededSummariesCount = Math.max(0, Math.ceil((newTotalTurns - contextDepth) / chunkSize));
 
-            // Nếu số gói cần thiết ít hơn số gói hiện có -> Cắt bớt
-            if (neededSummariesCount < updatedSummaries.length) {
-                updatedSummaries = updatedSummaries.slice(0, neededSummariesCount);
-                setLongTermSummaries(updatedSummaries);
-                setSummaryQueue([]); 
-                
-                logSystemMessage('system', 'system', `[Context Restore] Total Turns: ${newTotalTurns}. Pruned summaries to ${updatedSummaries.length} (was ${state.longTermSummaries.length}) to restore raw context.`);
-            }
+        // Nếu số gói cần thiết ít hơn số gói hiện có -> Cắt bớt
+        if (neededSummariesCount < updatedSummaries.length) {
+            updatedSummaries = updatedSummaries.slice(0, neededSummariesCount);
+            setLongTermSummaries(updatedSummaries);
+            setSummaryQueue([]); 
+            
+            logSystemMessage('system', 'system', `[Context Restore] Total Turns: ${newTotalTurns}. Pruned summaries to ${updatedSummaries.length} (was ${state.longTermSummaries.length}) to restore raw context.`);
         }
 
         // 6. Áp dụng State mới

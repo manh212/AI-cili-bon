@@ -4,6 +4,7 @@ import { useChatStore } from '../store/chatStore';
 import { summarizeHistory } from '../services/ai/semanticTasks.ts';
 import { dispatchSystemLog } from '../services/logBridge';
 import { ChatMessage } from '../types';
+import { getGlobalContextSettings } from '../services/settingsService';
 
 /**
  * Counts total turns in the chat history. A turn is typically a user-model exchange.
@@ -13,13 +14,14 @@ export const countTotalTurns = (messages: ChatMessage[]): number => {
 };
 
 export const useChatMemory = () => {
-    // Lấy thêm preset từ store để đọc cấu hình chunk_size
-    const { messages, longTermSummaries, setSessionData, card, summaryQueue, preset } = useChatStore();
+    // Removed preset from store destructuring, added global fetch
+    const { messages, longTermSummaries, setSessionData, card, summaryQueue } = useChatStore();
     const [isSummarizing, setIsSummarizing] = useState(false);
 
     // --- LOGIC TÓM TẮT MỚI (TẠO MỚI) ---
     const triggerSummarization = useCallback(async () => {
-        const chunkSize = preset?.summarization_chunk_size || 10;
+        const globalSettings = getGlobalContextSettings();
+        const chunkSize = globalSettings.summarization_chunk_size || 10;
         
         // 1. Xác định chúng ta đang ở đâu trong chuỗi tóm tắt
         // Số lượt đã được tóm tắt = Số lượng tóm tắt hiện có * Kích thước gói
@@ -58,20 +60,29 @@ export const useChatMemory = () => {
             // Cắt đoạn tin nhắn cần tóm tắt (KHÔNG XÓA KHỎI STORE)
             const chunkToSummarize = messages.slice(startIndex, cutIndex);
             
+            // --- LOAD GLOBAL PROMPT & APPLY ROLLING WINDOW ---
+            let promptTemplate = globalSettings.summarization_prompt || '';
+
+            // Calculate Rolling Window (Last 5 summaries)
+            const recentSummaries = longTermSummaries.slice(-5).join('\n---\n');
+            const placeholder = recentSummaries ? recentSummaries : "(Chưa có bối cảnh trước đó)";
+
+            // Inject into Prompt
+            const finalPrompt = promptTemplate.replace('{{recent_summaries}}', placeholder);
+            // --------------------------------------------------
+
             const summary = await summarizeHistory(
                 chunkToSummarize, 
                 card?.name || 'Character',
-                preset?.summarization_prompt
+                finalPrompt // Use the processed global prompt
             );
             
             if (summary) {
                 const newSummaries = [...longTermSummaries, summary];
                 
                 // Cập nhật Store: CHỈ THÊM TÓM TẮT, KHÔNG XÓA MESSAGES
-                // PromptManager sẽ tự động biết cách bỏ qua các tin nhắn cũ dựa trên số lượng tóm tắt.
                 setSessionData({ 
                     longTermSummaries: newSummaries
-                    // messages: remainingMessages  <-- DÒNG NÀY ĐÃ BỊ LOẠI BỎ ĐỂ GIỮ LỊCH SỬ
                 });
                 
                 dispatchSystemLog('script-success', 'system', `Đã lưu tóm tắt #${newSummaries.length} vào bộ nhớ dài hạn.`);
@@ -81,15 +92,14 @@ export const useChatMemory = () => {
         } finally {
             setIsSummarizing(false);
         }
-    }, [messages, longTermSummaries, card, setSessionData, preset]);
+    }, [messages, longTermSummaries, card, setSessionData]);
 
     // --- LOGIC TẠO LẠI (REGENERATE) ---
     const handleRegenerateSummary = useCallback(async (index: number) => {
-        const chunkSize = preset?.summarization_chunk_size || 10;
+        const globalSettings = getGlobalContextSettings();
+        const chunkSize = globalSettings.summarization_chunk_size || 10;
         
         // Tính toán phạm vi lượt (Turn range) tương ứng với Index
-        // Ví dụ: Index 0 (Chunk 10) -> Lượt 1-10
-        // Ví dụ: Index 1 (Chunk 10) -> Lượt 11-20
         const targetStartTurnCount = index * chunkSize;
         const targetEndTurnCount = (index + 1) * chunkSize;
 
@@ -115,7 +125,6 @@ export const useChatMemory = () => {
             }
         }
 
-        // Trường hợp đặc biệt: Nếu là block đầu tiên (Index 0), start luôn là 0
         if (index === 0) startIndex = 0;
 
         if (endIndex === -1) {
@@ -128,10 +137,22 @@ export const useChatMemory = () => {
         try {
             const chunkToSummarize = messages.slice(startIndex, endIndex);
             
+            // --- LOAD GLOBAL PROMPT & APPLY ROLLING WINDOW (FOR REGENERATE) ---
+            let promptTemplate = globalSettings.summarization_prompt || '';
+
+            // Calculate Rolling Window based on the SPECIFIC index being regenerated
+            // We need the 5 summaries BEFORE this index.
+            const previousSummaries = longTermSummaries.slice(0, index).slice(-5);
+            const recentText = previousSummaries.join('\n---\n');
+            const placeholder = recentText ? recentText : "(Chưa có bối cảnh trước đó)";
+            
+            const finalPrompt = promptTemplate.replace('{{recent_summaries}}', placeholder);
+            // ------------------------------------------------------------------
+
             const newSummaryContent = await summarizeHistory(
                 chunkToSummarize, 
                 card?.name || 'Character',
-                preset?.summarization_prompt
+                finalPrompt
             );
 
             if (newSummaryContent) {
@@ -149,7 +170,7 @@ export const useChatMemory = () => {
             dispatchSystemLog('error', 'system', `Lỗi tạo lại tóm tắt: ${e instanceof Error ? e.message : String(e)}`);
         }
 
-    }, [messages, longTermSummaries, card, setSessionData, preset]);
+    }, [messages, longTermSummaries, card, setSessionData]);
 
     return { 
         isSummarizing, 

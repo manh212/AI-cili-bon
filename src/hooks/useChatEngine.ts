@@ -9,7 +9,7 @@ import { useChatInterface } from './chat/useChatInterface';
 import { useMessageManipulator } from './chat/useMessageManipulator';
 import { useChatCommands } from './chat/useChatCommands';
 import { useLorebook } from '../contexts/LorebookContext'; 
-// MedusaService, syncDatabaseToLorebook, getApiKey REMOVED from here as they are now handled in useChatFlow
+import { getGlobalContextSettings } from '../services/settingsService';
 
 /**
  * useChatEngine: A unified aggregator for chat state and logic.
@@ -94,11 +94,13 @@ export const useChatEngine = (sessionId: string | null) => {
         // Chỉ chạy khi:
         // 1. Không đang tải (để đảm bảo tin nhắn cuối cùng đã hoàn tất)
         // 2. Không đang tóm tắt (tránh lặp)
-        // 3. Có preset (để lấy cấu hình)
+        // 3. Có preset (để lấy cấu hình - though now we use Global)
         if (store.isLoading || isSummarizing || !store.preset) return;
 
-        const contextLimit = store.preset.context_depth || 24;
-        const chunkSize = store.preset.summarization_chunk_size || 10;
+        // FETCH FROM GLOBAL SETTINGS NOW
+        const globalSettings = getGlobalContextSettings();
+        const contextLimit = globalSettings.context_depth || 24;
+        const chunkSize = globalSettings.summarization_chunk_size || 10;
 
         const totalTurns = countTotalTurns(store.messages);
         const summarizedTurns = store.longTermSummaries.length * chunkSize;
@@ -106,11 +108,6 @@ export const useChatEngine = (sessionId: string | null) => {
 
         // Nếu vượt quá giới hạn -> Tự động gọi tóm tắt
         if (activeTurnCount >= contextLimit) {
-            // Thêm log để người dùng biết hệ thống đang tự động làm việc
-            // logger.logSystemMessage('warn', 'system', `[Auto-Watch] Đạt ngưỡng ngữ cảnh (${activeTurnCount}/${contextLimit}). Kích hoạt tóm tắt tự động...`);
-            
-            // triggerSmartContext() bên trong đã có check logic (có đủ chunk để cắt không)
-            // nên gọi ở đây là an toàn.
             triggerSmartContext();
         }
 
@@ -121,7 +118,6 @@ export const useChatEngine = (sessionId: string | null) => {
         store.preset, 
         store.longTermSummaries.length, 
         triggerSmartContext
-        // logger dependency removed from effect to avoid loop, triggerSmartContext handles logging
     ]);
 
 

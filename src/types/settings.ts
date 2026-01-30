@@ -71,29 +71,6 @@ export interface SillyTavernPreset {
   // Thinking Config (Gemini 2.5+)
   thinking_budget?: number;
 
-  // TTS Settings
-  tts_enabled?: boolean;
-  tts_streaming?: boolean;
-  tts_provider?: 'gemini' | 'native';
-  tts_voice?: string;
-  tts_native_voice?: string;
-  tts_rate?: number;
-  tts_pitch?: number;
-
-  // Smart World Info Scan Settings
-  smart_scan_enabled?: boolean;
-  smart_scan_mode?: 'keyword' | 'hybrid' | 'ai_only';
-  smart_scan_model?: string;
-  smart_scan_depth?: number;
-  smart_scan_max_entries?: number;
-  smart_scan_system_prompt?: string;
-
-  // Smart Context & Memory Settings
-  context_depth?: number;
-  summarization_chunk_size?: number;
-  context_mode?: 'standard' | 'ai_only';
-  summarization_prompt?: string;
-
   // Prompt Formatting
   wi_format?: string;
   scenario_format?: string;

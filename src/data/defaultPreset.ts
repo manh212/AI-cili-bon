@@ -16,105 +16,8 @@ const defaultPreset: SillyTavernPreset = {
     // Experimental Settings
     thinking_budget: 0, // Mặc định tắt (0)
 
-    // TTS Settings
-    tts_enabled: false,
-    tts_streaming: false, // Default off
-
-    // Smart Scan Defaults
-    smart_scan_enabled: true, // Bật mặc định vì chế độ là AI Only
-    smart_scan_mode: 'ai_only', // 3. AI Toàn Quyền (AI Only)
-    smart_scan_model: 'gemini-flash-lite-latest', // Gemini 2.5 Flash-Lite
-    smart_scan_depth: 6, // 6, Độ sâu Quét (Tin nhắn)
-    smart_scan_max_entries: 20, // 20, Ngân sách Mục (Max Entries)
-    smart_scan_system_prompt: `Bạn là Predictive Context Engine (PCE) - Động cơ Dự đoán Ngữ cảnh cho hệ thống nhập vai thế hệ mới.
-
-NHIỆM VỤ TỐI THƯỢNG:
-Chọn lọc các mục World Info (WI) từ danh sách ứng viên dựa trên hành động hiện tại VÀ dự đoán nhu cầu tương lai của người chơi.
-
-------------------------------------------
-PHÂN VÙNG DỮ LIỆU (QUAN TRỌNG)
-------------------------------------------
-
-A. VÙNG THAM KHẢO (READ-ONLY):
-   Dùng để hiểu ngữ cảnh. TUYỆT ĐỐI KHÔNG CHỌN ID TỪ ĐÂY.
-   1. <KIẾN THỨC NỀN>: {{context}}
-   2. <TRẠNG THÁI HIỆN TẠI>: {{state}}
-   3. <LỊCH SỬ HỘI THOẠI>: {{history}}
-
-B. VÙNG KÍCH HOẠT:
-   <HÀNH ĐỘNG MỚI NHẤT>: {{input}}
-
-C. VÙNG ỨNG VIÊN (SELECTABLE):
-   Chỉ được phép trích xuất ID từ danh sách này.
-   <DANH SÁCH ỨNG VIÊN WI>: {{candidates}}
-
-------------------------------------------
-QUY TRÌNH TƯ DUY (AGENTIC WORKFLOW)
-------------------------------------------
-
-BƯỚC 1: PHÂN TÍCH & QUÉT TRẠNG THÁI
-- Ý định của User là gì? (Chiến đấu, Giao tiếp, Di chuyển?)
-- Kiểm tra {{state}}: Có biến số nào ở mức báo động không?
-  * Ví dụ: Nếu \`stamina < 5\`, cần tìm WI về 'Kiệt sức' hoặc 'Nghỉ ngơi'.
-
-BƯỚC 2: DỰ ĐOÁN TƯƠNG LAI (Predictive Modeling)
-- Dựa vào Input, điều gì CÓ KHẢ NĂNG CAO sẽ xảy ra trong 1-2 lượt tới?
-  * Ví dụ: User "Rút kiếm" -> Dự đoán cần WI "Hệ thống chiến đấu" hoặc "Kỹ năng kiếm thuật".
-  * Ví dụ: User "Bước vào hầm ngục" -> Dự đoán cần WI "Cạm bẫy" hoặc "Quái vật khu vực".
-
-BƯỚC 3: LỌC HAI LỚP (Dual-Layer Filtering)
-- Lớp 1 (Chính xác): Quét {{candidates}} tìm các mục khớp từ khóa trực tiếp với Input (Tên riêng, vật phẩm, địa danh).
-- Lớp 2 (Dự đoán): Quét {{candidates}} tìm các mục khớp với kịch bản dự đoán ở Bước 2 hoặc trạng thái nguy cấp ở Bước 1.
-
-BƯỚC 4: KIỂM TRA & LOẠI TRỪ
-- Hợp nhất kết quả Lớp 1 và Lớp 2.
-- LOẠI BỎ các mục đã có sẵn trong phần {{context}} hoặc {{history}} (để tránh dư thừa).
-- Nếu không có mục nào phù hợp, trả về danh sách rỗng.
-
-------------------------------------------
-CẤU TRÚC OUTPUT JSON
-------------------------------------------
-{
-  "_thought": "1. Ý định: [...]. 2. Dự đoán: [Người chơi sắp làm X, cần thông tin Y]. 3. Lọc: [Tìm thấy ID khớp trực tiếp là A, ID dự đoán là B].",
-  "selected_ids": ["uid_1", "uid_2"]
-}`,
-
-    // Smart Context Defaults
-    context_depth: 24, // 24, Độ sâu Cửa sổ Nhớ (Trigger Threshold)
-    summarization_chunk_size: 12, // 12, Kích thước gói tóm tắt (Sliding Window)
-    context_mode: 'ai_only', // Chế độ Tự thuật (Chỉ AI)
-    summarization_prompt: `Bạn là một AI tóm tắt viên, chuyên nghiệp trong việc chắt lọc những sự kiện chính từ một loạt các diễn biến trong một game nhập vai.
-User (người chơi) và {{char}} đang trong một phần của cuộc phiêu lưu.
-
-NHẬT KÝ DIỄN BIẾN CẦN TÓM TẮT:
----
-{{chat_history_slice}}
----
-
-YÊU CẦU:
-Hãy viết một đoạn văn (khoảng 400-500 chữ) tóm tắt lại những sự kiện, quyết định, và kết quả nổi bật nhất đã xảy ra trong nhật ký trên. Tập trung vào:
-1. Hành động quan trọng của người chơi và hậu quả trực tiếp.
-2. Sự kiện lớn hoặc bất ngờ.
-3. Thay đổi đáng kể về trạng thái nhiệm vụ (bắt đầu, hoàn thành mục tiêu, hoàn thành nhiệm vụ).
-4. NPC hoặc địa điểm mới quan trọng được khám phá.
-5. Thu thập vật phẩm hoặc học kỹ năng đặc biệt (nếu có ý nghĩa lớn).
-6. Thay đổi quan trọng về mối quan hệ với NPC hoặc phe phái.
-7. Nếu có hệ thống tu luyện/sức mạnh, đề cập đến những tiến triển hoặc thất bại quan trọng.
-
-Mục tiêu là tạo ra một bản tóm tắt giúp người chơi nhanh chóng nắm bắt lại những gì đã xảy ra trước đó để tiếp tục cuộc phiêu lưu một cách mạch lạc.
-Tránh đi sâu vào các chi tiết nhỏ hoặc các thay đổi chỉ số thông thường. Chỉ viết đoạn văn tóm tắt, không thêm lời dẫn hay tag nào khác.`,
-
     // Default prompt structure using the new macros
     prompts: [
-        // ... (Refer to existing file for full list, omitted here for brevity as no changes needed in prompts array) ...
-        // Note: The rest of this file is maintained as is from the previous context.
-        // We are just updating the top-level properties.
-    ],
-    // ... (Populate with existing prompts content if I were to rewrite the whole file, but for this XML block I only need to ensure the structure matches up to prompts)
-} as any; // Cast to avoid TS strictness on omitted prompts in this partial update if needed, but better to keep full file.
-
-// Re-injecting the full prompts to ensure file integrity in XML output
-defaultPreset.prompts = [
         // --- GROUP 1: SYSTEM & IDENTITY (NỀN TẢNG) ---
         {
             name: "Bắt đầu game",
@@ -683,6 +586,7 @@ Bây giờ, hãy đóng vai nhân vật và tiếp tục câu chuyện một cá
             identifier: "ai_response_instruction",
             enabled: true,
         },
-    ];
+    ]
+} as any; 
 
 export default defaultPreset;

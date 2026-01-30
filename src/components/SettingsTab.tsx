@@ -5,10 +5,10 @@ import { ApiSettings } from './ApiSettings';
 import { SmartScanSettings } from './SmartScanSettings';
 import { SmartContextSettings } from './SmartContextSettings'; 
 import { TtsSettings } from './TtsSettings'; 
-import { BackupRestoreSettings } from './BackupRestoreSettings'; // New Import
-import { usePreset } from '../contexts/PresetContext';
+import { BackupRestoreSettings } from './BackupRestoreSettings'; 
+// import { usePreset } from '../contexts/PresetContext'; // Removed
 
-type ActiveSubTab = 'persona' | 'api' | 'smartscan' | 'context' | 'tts' | 'backup'; // Added 'backup'
+type ActiveSubTab = 'persona' | 'api' | 'smartscan' | 'context' | 'tts' | 'backup';
 
 const SubTabButton: React.FC<{
   tabId: ActiveSubTab;
@@ -35,9 +35,7 @@ const SubTabButton: React.FC<{
 
 export const SettingsTab: React.FC = () => {
     const [activeSubTab, setActiveSubTab] = useState<ActiveSubTab>('persona');
-    const { activePresetName, presets, updateActivePreset } = usePreset();
-    
-    const activePreset = presets.find(p => p.name === activePresetName);
+    // const { activePresetName, presets, updateActivePreset } = usePreset(); // Removed
 
     return (
         <div className="max-w-7xl mx-auto">
@@ -63,14 +61,9 @@ export const SettingsTab: React.FC = () => {
                 {activeSubTab === 'api' && <ApiSettings />}
                 {activeSubTab === 'backup' && <BackupRestoreSettings />}
                 {activeSubTab === 'tts' && (
-                    activePreset ? (
-                        <div className="bg-slate-800/50 p-6 rounded-xl shadow-lg max-w-2xl mx-auto">
-                            <h3 className="text-xl font-bold text-sky-400 mb-4">Cấu hình Text-to-Speech (Preset: {activePreset.name})</h3>
-                            <TtsSettings preset={activePreset} onUpdate={updateActivePreset} />
-                        </div>
-                    ) : (
-                         <div className="text-center text-slate-500 p-8">Vui lòng chọn một Preset đang hoạt động để cấu hình tính năng này.</div>
-                    )
+                    <div className="bg-slate-800/50 p-6 rounded-xl shadow-lg max-w-2xl mx-auto">
+                        <TtsSettings />
+                    </div>
                 )}
                 {activeSubTab === 'smartscan' && (
                     <div className="bg-slate-800/50 p-6 rounded-xl shadow-lg max-w-2xl mx-auto">
@@ -78,14 +71,9 @@ export const SettingsTab: React.FC = () => {
                     </div>
                 )}
                 {activeSubTab === 'context' && (
-                    activePreset ? (
-                        <div className="bg-slate-800/50 p-6 rounded-xl shadow-lg max-w-4xl mx-auto">
-                            <h3 className="text-xl font-bold text-sky-400 mb-4">Cấu hình Ngữ cảnh & Bộ nhớ (Preset: {activePreset.name})</h3>
-                            <SmartContextSettings preset={activePreset} onUpdate={updateActivePreset} />
-                        </div>
-                    ) : (
-                         <div className="text-center text-slate-500 p-8">Vui lòng chọn một Preset đang hoạt động để cấu hình tính năng này.</div>
-                    )
+                    <div className="bg-slate-800/50 p-6 rounded-xl shadow-lg max-w-4xl mx-auto">
+                        <SmartContextSettings />
+                    </div>
                 )}
             </div>
         </div>
