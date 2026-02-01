@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import type { SystemLogEntry, ChatTurnLog, SummaryQueueItem, NetworkLogEntry } from '../../types';
+import type { SystemLogEntry, ChatTurnLog, SummaryQueueItem, NetworkLogEntry, ChatMessage } from '../../types';
 
 // Import sub-components from the new directory
 import { ConsoleView } from './Debug/ConsoleView';
@@ -28,6 +28,7 @@ interface DebugPanelProps {
         mythicLog: string[];
         networkLog?: NetworkLogEntry[];
     };
+    messages?: ChatMessage[]; // Added optional messages
     onClearLogs: () => void;
     onInspectState: () => void;
     onCopyLogs: () => void; 
@@ -45,6 +46,7 @@ interface DebugPanelProps {
 
 export const DebugPanel: React.FC<DebugPanelProps> = ({ 
     logs, 
+    messages,
     onClearLogs, 
     onInspectState, 
     copyStatus, 
@@ -145,6 +147,7 @@ export const DebugPanel: React.FC<DebugPanelProps> = ({
                         </h3>
                         <SummariesView 
                             turns={logs.turns} 
+                            messages={messages || []}
                             stats={summaryStats} 
                             longTermSummaries={longTermSummaries} 
                             summaryQueue={summaryQueue} 

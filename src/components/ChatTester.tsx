@@ -212,6 +212,7 @@ export const ChatTester: React.FC<ChatTesterProps> = ({ sessionId, onBack }) => 
             >
                 <DebugPanel 
                     logs={engine.logs} 
+                    messages={engine.messages} // FIX: Pass full messages history for reconstruction
                     onClearLogs={engine.clearLogs} 
                     onInspectState={() => ui.setIsHUDOpen(true)} 
                     onCopyLogs={() => {}} 

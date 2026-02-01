@@ -1,7 +1,9 @@
 
-import React, { useState } from 'react';
-import type { ChatTurnLog, SummaryQueueItem } from '../../../types';
+import React, { useState, useMemo } from 'react';
+import type { ChatTurnLog, SummaryQueueItem, ChatMessage, PromptSection } from '../../../types';
 import { CopyButton } from '../../ui/CopyButton';
+import { getGlobalContextSettings } from '../../../services/settingsService';
+import { PromptBlock } from './DebugCommons';
 
 interface SummaryStats {
     messageCount: number;
@@ -13,6 +15,7 @@ interface SummaryStats {
 
 interface SummariesViewProps {
     turns: ChatTurnLog[];
+    messages: ChatMessage[];
     stats?: SummaryStats;
     onForceSummarize?: () => void;
     longTermSummaries?: string[];
@@ -23,6 +26,7 @@ interface SummariesViewProps {
 
 export const SummariesView: React.FC<SummariesViewProps> = ({ 
     turns, 
+    messages,
     stats, 
     onForceSummarize, 
     longTermSummaries = [], 
@@ -45,6 +49,81 @@ export const SummariesView: React.FC<SummariesViewProps> = ({
     const isBusy = queueLength > 0;
     const currentTask = summaryQueue.length > 0 ? summaryQueue[0] : null;
     const hasError = currentTask?.status === 'failed';
+
+    // --- RECONSTRUCTION LOGIC ---
+    // Reconstruct the exact prompt used to generate a specific summary index
+    const reconstructPrompt = (index: number): PromptSection[] => {
+        const settings = getGlobalContextSettings();
+        const chunkSize = settings.summarization_chunk_size || 10;
+        const template = settings.summarization_prompt || '';
+
+        // 1. Context (Rolling Window of 5 previous summaries)
+        const prevSummaries = longTermSummaries.slice(0, index).slice(-5);
+        // Format for list view
+        const prevSummariesList = prevSummaries.map((s, i) => `[Tóm tắt cũ #${i + 1}]: ${s.substring(0, 100)}...`);
+        const contextContent = prevSummaries.length > 0 
+            ? `Bao gồm ${prevSummaries.length} gói tóm tắt liền trước.` 
+            : "(Chưa có bối cảnh trước đó)";
+
+        // 2. Data Slice (Actual messages covered by this summary)
+        // Count Model messages to find start/end indices in the full message array
+        let startMsgIdx = 0;
+        let endMsgIdx = messages.length;
+        let turnCount = 0;
+        const targetStartTurn = index * chunkSize;
+        const targetEndTurn = (index + 1) * chunkSize;
+
+        for (let i = 0; i < messages.length; i++) {
+            if (messages[i].role === 'model') {
+                turnCount++;
+                // If this model message ends the previous block, the NEXT message starts this block
+                if (turnCount === targetStartTurn) startMsgIdx = i + 1;
+                // If this model message ends the current block, this is the end (exclusive for slice)
+                if (turnCount === targetEndTurn) {
+                    endMsgIdx = i + 1;
+                    break;
+                }
+            }
+        }
+        if (index === 0) startMsgIdx = 0; // Ensure first block starts at 0
+
+        const slice = messages.slice(startMsgIdx, endMsgIdx);
+        // Format for list view (distinct items)
+        const sliceList = slice.map(m => {
+            const role = m.role === 'user' ? 'User' : (m.role === 'model' ? 'Char' : 'System');
+            // Clean content for display
+            const cleanContent = m.content.replace(/<[^>]*>/g, '').trim(); 
+            return `[${role}] ${cleanContent}`;
+        });
+
+        const sliceContent = sliceList.length > 0 
+            ? `Bao gồm ${sliceList.length} tin nhắn (từ lượt ${targetStartTurn + 1} đến ${turnCount}).`
+            : "(Không tìm thấy dữ liệu tương ứng trong lịch sử hiện tại)";
+
+        // 3. Return as structured sections for PromptBlock
+        return [
+            { 
+                id: 'sys', 
+                name: '⚙️ System Instruction (Template)', 
+                content: template, 
+                role: 'system' 
+            },
+            { 
+                id: 'ctx', 
+                name: '📚 Previous Context (Rolling Window)', 
+                content: contextContent, 
+                role: 'system',
+                subSections: prevSummaries.length > 0 ? prevSummaries : undefined // Pass array for distinct blocks
+            },
+            { 
+                id: 'dat', 
+                name: '💬 Target Data (Chat Slice)', 
+                content: sliceContent, 
+                role: 'user',
+                subSections: sliceList.length > 0 ? sliceList : undefined // Pass array for distinct blocks
+            }
+        ];
+    };
 
     const handleRegenerateClick = async (index: number) => {
         if (!onRegenerate || regeneratingIndices.has(index)) return;
@@ -145,6 +224,8 @@ export const SummariesView: React.FC<SummariesViewProps> = ({
             ) : (
                 <div className="flex flex-col gap-2">
                     {longTermSummaries.map((summaryContent, index) => {
+                        const reconstructedParts = reconstructPrompt(index);
+                        
                         return (
                             <details key={index} className="group bg-slate-900/30 border border-slate-700/50 rounded-lg">
                                 <summary className="px-3 py-2 cursor-pointer hover:bg-slate-800/50 transition-colors select-none list-none flex items-center justify-between rounded-lg outline-none focus:ring-2 focus:ring-sky-500/50">
@@ -155,9 +236,25 @@ export const SummariesView: React.FC<SummariesViewProps> = ({
                                     <span className="transform group-open:rotate-90 transition-transform text-slate-500 text-[10px]" aria-hidden="true">▶</span>
                                 </summary>
                                 <div className="p-3 border-t border-slate-700/50 relative">
+                                    
+                                    {/* NEW: Reconstructed Prompt View */}
+                                    <details className="mb-4 group/prompt border-l-2 border-indigo-500/30 pl-2">
+                                        <summary className="cursor-pointer text-[10px] text-indigo-400 hover:text-indigo-300 font-bold mb-2 flex items-center gap-2">
+                                            <span>📤 Lời nhắc Tóm tắt (Reconstructed)</span>
+                                            <span className="transform group-open/prompt:rotate-90 transition-transform text-[8px]" aria-hidden="true">▶</span>
+                                        </summary>
+                                        <div className="space-y-2 mt-2">
+                                            {reconstructedParts.map((part) => (
+                                                <PromptBlock key={part.id} section={part} />
+                                            ))}
+                                        </div>
+                                    </details>
+
                                     <div className="absolute top-3 right-3 z-10 flex gap-1">
                                         <CopyButton textToCopy={summaryContent || ''} absolute={true} />
                                     </div>
+                                    
+                                    <div className="text-[10px] text-green-400 font-bold mb-1">📥 Kết quả (Result)</div>
                                     <div className="bg-amber-900/10 border border-amber-900/30 p-3 rounded mb-2">
                                         <p className="text-[10px] text-slate-300 leading-relaxed whitespace-pre-wrap">{summaryContent}</p>
                                     </div>

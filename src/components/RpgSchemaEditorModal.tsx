@@ -118,13 +118,27 @@ export const RpgSchemaEditorModal: React.FC<RpgSchemaEditorModalProps> = ({ isOp
     };
 
     const handleDeleteTable = (id: string) => {
+        // Confirmation removed as requested
         setDbState(prev => ({ ...prev, tables: prev.tables.filter(t => t.config.id !== id) }));
         if (activeTableId === id) setActiveTableId(null);
+        showToast("Đã xóa bảng.", "info");
     };
     
     const handleResetToTemplate = () => {
+        if (!window.confirm("Hành động này sẽ xóa toàn bộ cấu trúc hiện tại và thay thế bằng mẫu mặc định. Bạn có chắc không?")) return;
         setDbState(getTemplateVH());
         setActiveTableId(null);
+    };
+
+    // --- NEW: Copy Table Logic ---
+    const handleCopyTableJson = (table: RPGTable) => {
+        try {
+            const json = JSON.stringify(table, null, 2);
+            navigator.clipboard.writeText(json);
+            showToast(`Đã sao chép cấu hình bảng "${table.config.name}"`, "success");
+        } catch (e) {
+            showToast("Lỗi sao chép dữ liệu bảng.", "error");
+        }
     };
 
     // --- OPTION A IMPLEMENTATION ---
@@ -173,22 +187,54 @@ export const RpgSchemaEditorModal: React.FC<RpgSchemaEditorModalProps> = ({ isOp
                             Danh Sách Bảng
                         </div>
                         <div className="flex-grow overflow-y-auto p-2 space-y-1 custom-scrollbar">
-                            {dbState.tables.map(table => (
-                                <div 
-                                    key={table.config.id}
-                                    className={`group flex items-center justify-between p-2 rounded cursor-pointer text-sm ${activeTableId === table.config.id ? 'bg-sky-600 text-white' : 'text-slate-300 hover:bg-slate-700'}`}
-                                    onClick={() => setActiveTableId(table.config.id)}
-                                >
-                                    <span className="truncate">{table.config.name}</span>
-                                    <button 
-                                        onClick={(e) => { e.stopPropagation(); handleDeleteTable(table.config.id); }}
-                                        className="opacity-0 group-hover:opacity-100 p-1 hover:text-red-300 transition-opacity"
-                                        aria-label={`Xóa bảng ${table.config.name}`}
-                                    >
-                                        ×
-                                    </button>
-                                </div>
-                            ))}
+                            {dbState.tables.map(table => {
+                                const isActive = activeTableId === table.config.id;
+                                return (
+                                    <div key={table.config.id} className="flex items-stretch rounded-lg overflow-hidden mb-1 shadow-sm transition-all hover:shadow-md group">
+                                        <button
+                                            onClick={() => setActiveTableId(table.config.id)}
+                                            className={`flex-grow text-left px-3 py-2 text-sm truncate transition-colors ${
+                                                isActive
+                                                ? 'bg-sky-600 text-white'
+                                                : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                                            }`}
+                                            title={table.config.name}
+                                        >
+                                            {table.config.name}
+                                        </button>
+
+                                        <div className={`flex shrink-0 ${isActive ? 'bg-sky-700' : 'bg-slate-900'} border-l border-slate-700/30`}>
+                                            <button
+                                                onClick={(e) => { e.stopPropagation(); handleCopyTableJson(table); }}
+                                                className={`p-2 flex items-center justify-center transition-colors ${
+                                                    isActive
+                                                    ? 'text-sky-200 hover:text-white hover:bg-sky-600'
+                                                    : 'text-slate-500 hover:text-sky-400 hover:bg-slate-800'
+                                                }`}
+                                                title="Sao chép JSON bảng này"
+                                            >
+                                                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                                                    <path d="M8 3a1 1 0 011-1h2a1 1 0 110 2H9a1 1 0 01-1-1z" />
+                                                    <path d="M6 3a2 2 0 00-2 2v11a2 2 0 002 2h8a2 2 0 002-2V5a2 2 0 00-2-2 3 3 0 01-3 3H9a3 3 0 01-3-3z" />
+                                                </svg>
+                                            </button>
+                                            <button
+                                                onClick={(e) => { e.stopPropagation(); handleDeleteTable(table.config.id); }}
+                                                 className={`p-2 flex items-center justify-center transition-colors ${
+                                                    isActive
+                                                    ? 'text-sky-200 hover:text-red-200 hover:bg-red-600/50'
+                                                    : 'text-slate-500 hover:text-red-400 hover:bg-slate-800'
+                                                }`}
+                                                title="Xóa bảng"
+                                            >
+                                                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                                                    <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm4 0a1 1 0 012 0v6a1 1 0 11-2 0V8z" clipRule="evenodd" />
+                                                </svg>
+                                            </button>
+                                        </div>
+                                    </div>
+                                );
+                            })}
                         </div>
                         <div className="p-3 border-t border-slate-700">
                             <button onClick={handleAddTable} className="w-full py-2 bg-slate-700 hover:bg-slate-600 text-sky-400 font-bold text-xs rounded border border-slate-600 border-dashed">

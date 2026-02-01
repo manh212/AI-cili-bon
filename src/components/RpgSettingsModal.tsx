@@ -203,7 +203,16 @@ export const RpgSettingsModal: React.FC<RpgSettingsModalProps> = ({ isOpen, onCl
         const reader = new FileReader();
         reader.onload = (ev) => {
             try {
-                const jsonContent = JSON.parse(ev.target?.result as string);
+                let jsonContent = JSON.parse(ev.target?.result as string);
+
+                // --- SPECIAL HANDLING: EXTRACT 'TEMPLATE' KEY IF PRESENT ---
+                // Support extracting only the RPG data part from a Composite Config file
+                if (jsonContent.template && typeof jsonContent.template === 'object') {
+                    console.log("Detected Composite Config. Extracting 'template' part for import.");
+                    jsonContent = jsonContent.template;
+                }
+                // -----------------------------------------------------------
+
                 let importedDb: RPGDatabase;
 
                 if (jsonContent.tables && Array.isArray(jsonContent.tables)) {
@@ -234,7 +243,15 @@ export const RpgSettingsModal: React.FC<RpgSettingsModalProps> = ({ isOpen, onCl
     const handleImportText = () => {
         if (!jsonInput.trim()) return;
         try {
-            const rawData = parseLooseJson(jsonInput);
+            let rawData = parseLooseJson(jsonInput);
+
+            // --- SPECIAL HANDLING: EXTRACT 'TEMPLATE' KEY IF PRESENT ---
+            if (rawData.template && typeof rawData.template === 'object') {
+                console.log("Detected Composite Config. Extracting 'template' part for import.");
+                rawData = rawData.template;
+            }
+            // -----------------------------------------------------------
+
             let tablesToMerge: RPGTable[] = [];
 
             if (rawData.tables && Array.isArray(rawData.tables)) {
