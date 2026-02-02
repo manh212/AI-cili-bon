@@ -38,11 +38,10 @@ export const RpgSection: React.FC<RpgSectionProps> = ({ card, onUpdate }) => {
                 onUpdate({ ...card, rpg_data: template });
             }
         } else {
-            if (window.confirm("Tắt hệ thống RPG sẽ xóa toàn bộ cấu trúc bảng hiện tại. Bạn có chắc chắn không?")) {
-                const newCard = { ...card };
-                delete newCard.rpg_data;
-                onUpdate(newCard);
-            }
+            // Removed confirmation dialog as requested
+            const newCard = { ...card };
+            delete newCard.rpg_data;
+            onUpdate(newCard);
         }
     };
 

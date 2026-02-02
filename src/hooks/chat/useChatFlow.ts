@@ -518,7 +518,10 @@ export const useChatFlow = () => {
                                 const mythicStartTime = Date.now();
                                 let historyLog = `User: ${text}\nGM/System: ${accumulatedText}`;
                                 
-                                if (freshState.messages.length <= 3) {
+                                // FIX: Count user messages to determine if this is the first turn
+                                const userMsgCount = freshState.messages.filter(m => m.role === 'user').length;
+                                
+                                if (userMsgCount === 0) {
                                     const greetingMsg = freshState.messages.find(m => m.role === 'model');
                                     if (greetingMsg && greetingMsg.content) {
                                         historyLog = `System (Context/Greeting): ${greetingMsg.content}\n\n${historyLog}`;
