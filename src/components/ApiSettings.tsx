@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
     getConnectionSettings, 
     saveConnectionSettings, 
@@ -17,9 +17,12 @@ import {
     saveProxyLegacyMode, 
     getProxyForTools, 
     saveProxyForTools,
+    getProxyProfiles,
+    saveProxyProfiles,
     GlobalConnectionSettings,
     CompletionSource,
-    ProxyProtocol
+    ProxyProtocol,
+    ProxyProfile
 } from '../services/settingsService';
 import { validateOpenRouterKey, getOpenRouterModels } from '../services/geminiService';
 import type { OpenRouterModel } from '../types';
@@ -27,6 +30,7 @@ import { Loader } from './Loader';
 import { ToggleInput } from './ui/ToggleInput';
 import { SelectInput } from './ui/SelectInput';
 import { LabeledInput } from './ui/LabeledInput';
+import { useToast } from './ToastSystem';
 
 // New Reusable Component for Model Selection with "Other" option
 const ModelSelectorWithCustom: React.FC<{
@@ -78,6 +82,8 @@ const ModelSelectorWithCustom: React.FC<{
 };
 
 export const ApiSettings: React.FC = () => {
+    const { showToast } = useToast();
+
     // Global Connection State
     const [connection, setConnection] = useState<GlobalConnectionSettings>(getConnectionSettings());
     
@@ -101,6 +107,11 @@ export const ApiSettings: React.FC = () => {
     const [proxyPingStatus, setProxyPingStatus] = useState<'idle' | 'success' | 'error'>('idle');
     const [proxyErrorMessage, setProxyErrorMessage] = useState('');
 
+    // Proxy Profile State
+    const [profiles, setProfiles] = useState<ProxyProfile[]>([]);
+    const [activeProfileId, setActiveProfileId] = useState<string>('');
+    const fileInputRef = useRef<HTMLInputElement>(null);
+
     // UI State
     const [saveStatus, setSaveStatus] = useState<'idle' | 'saved' | 'error'>('idle');
     const [isValidatingOR, setIsValidatingOR] = useState(false);
@@ -120,6 +131,7 @@ export const ApiSettings: React.FC = () => {
         setProxyForTools(getProxyForTools());
         
         setConnection(getConnectionSettings());
+        setProfiles(getProxyProfiles());
     }, []);
 
     // Helper to update connection state
@@ -234,6 +246,138 @@ export const ApiSettings: React.FC = () => {
         } finally {
             setIsPingingProxy(false);
         }
+    };
+
+    // --- PROXY PROFILE LOGIC ---
+
+    const handleProfileChange = (profileId: string) => {
+        setActiveProfileId(profileId);
+        const profile = profiles.find(p => p.id === profileId);
+        if (profile) {
+            // Apply settings to UI state
+            setProxyUrl(profile.url);
+            setProxyPassword(profile.password);
+            setProxyLegacyMode(profile.legacyMode);
+            setProxyForTools(profile.proxyForTools);
+            
+            // Apply settings to Global Connection
+            setConnection(prev => ({
+                ...prev,
+                proxy_protocol: profile.protocol,
+                proxy_model: profile.chatModel,
+                proxy_tool_model: profile.toolModel
+            }));
+            
+            showToast(`Đã tải cấu hình: ${profile.name}`, 'info');
+        }
+    };
+
+    const handleSaveProfile = () => {
+        if (!activeProfileId) {
+            handleCreateProfile(); // Redirect to create new if no active profile
+            return;
+        }
+
+        const updatedProfiles = profiles.map(p => {
+            if (p.id === activeProfileId) {
+                return {
+                    ...p,
+                    url: proxyUrl,
+                    password: proxyPassword,
+                    legacyMode: proxyLegacyMode,
+                    proxyForTools: proxyForTools,
+                    protocol: connection.proxy_protocol,
+                    chatModel: connection.proxy_model,
+                    toolModel: connection.proxy_tool_model
+                };
+            }
+            return p;
+        });
+
+        setProfiles(updatedProfiles);
+        saveProxyProfiles(updatedProfiles);
+        showToast("Đã cập nhật cấu hình hiện tại.", 'success');
+    };
+
+    const handleCreateProfile = () => {
+        const name = prompt("Nhập tên cho cấu hình mới:", "My Proxy Server");
+        if (!name) return;
+
+        const newProfile: ProxyProfile = {
+            id: `profile_${Date.now()}`,
+            name,
+            url: proxyUrl,
+            password: proxyPassword,
+            legacyMode: proxyLegacyMode,
+            proxyForTools: proxyForTools,
+            protocol: connection.proxy_protocol,
+            chatModel: connection.proxy_model,
+            toolModel: connection.proxy_tool_model
+        };
+
+        const newProfiles = [...profiles, newProfile];
+        setProfiles(newProfiles);
+        saveProxyProfiles(newProfiles);
+        setActiveProfileId(newProfile.id);
+        showToast(`Đã tạo cấu hình mới: ${name}`, 'success');
+    };
+
+    const handleDeleteProfile = () => {
+        if (!activeProfileId) return;
+        if (!confirm("Bạn có chắc chắn muốn xóa cấu hình này không?")) return;
+
+        const newProfiles = profiles.filter(p => p.id !== activeProfileId);
+        setProfiles(newProfiles);
+        saveProxyProfiles(newProfiles);
+        setActiveProfileId('');
+        showToast("Đã xóa cấu hình.", 'info');
+    };
+
+    const handleExportProfiles = () => {
+        if (profiles.length === 0) {
+            showToast("Không có cấu hình nào để xuất.", "warning");
+            return;
+        }
+        const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(profiles, null, 2));
+        const a = document.createElement('a');
+        a.href = dataStr;
+        a.download = `ProxyProfiles_${Date.now()}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+    };
+
+    const handleImportProfiles = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+            try {
+                const imported = JSON.parse(ev.target?.result as string);
+                if (Array.isArray(imported)) {
+                    // Simple merge: append new ones
+                    const merged = [...profiles, ...imported];
+                    // Deduplicate by ID just in case, preferring new import? Or keep old?
+                    // Let's just create new IDs for imported to be safe
+                    const safeImported = imported.map((p: any) => ({
+                        ...p,
+                        id: `import_${Date.now()}_${Math.random().toString(36).substr(2,5)}`
+                    }));
+                    
+                    const finalProfiles = [...profiles, ...safeImported];
+                    setProfiles(finalProfiles);
+                    saveProxyProfiles(finalProfiles);
+                    showToast(`Đã nhập ${safeImported.length} cấu hình.`, 'success');
+                } else {
+                    showToast("File không hợp lệ.", "error");
+                }
+            } catch (err) {
+                showToast("Lỗi nhập file JSON.", "error");
+            }
+        };
+        reader.readAsText(file);
+        e.target.value = ''; // Reset input
     };
 
     // --- RENDER ---
@@ -357,6 +501,40 @@ export const ApiSettings: React.FC = () => {
                 {connection.source === 'proxy' && (
                     <div className="space-y-6 animate-fade-in-up">
                         
+                        {/* --- PROFILE MANAGER TOOLBAR --- */}
+                        <div className="bg-slate-900/50 p-3 rounded-lg border border-slate-700 flex flex-col gap-3">
+                            <div className="flex items-center justify-between">
+                                <label className="text-xs font-bold text-slate-400 uppercase tracking-wide">Quản lý Cấu hình (Profile)</label>
+                                <div className="flex gap-2">
+                                    <input 
+                                        type="file" 
+                                        ref={fileInputRef} 
+                                        accept=".json" 
+                                        className="hidden" 
+                                        onChange={handleImportProfiles}
+                                    />
+                                    <button onClick={() => fileInputRef.current?.click()} className="text-[10px] bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-slate-300" title="Nhập Profile">Nhập</button>
+                                    <button onClick={handleExportProfiles} className="text-[10px] bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-slate-300" title="Xuất Profile">Xuất</button>
+                                </div>
+                            </div>
+                            <div className="flex gap-2 items-center">
+                                <select 
+                                    value={activeProfileId} 
+                                    onChange={(e) => handleProfileChange(e.target.value)}
+                                    className="flex-grow bg-slate-800 border border-slate-600 rounded p-2 text-sm text-white"
+                                >
+                                    <option value="">-- Chọn cấu hình --</option>
+                                    {profiles.map(p => (
+                                        <option key={p.id} value={p.id}>{p.name}</option>
+                                    ))}
+                                </select>
+                                <button onClick={handleSaveProfile} className="px-3 py-2 bg-sky-600 hover:bg-sky-500 text-white rounded text-sm font-bold" title="Lưu thay đổi vào Profile hiện tại">Lưu</button>
+                                <button onClick={handleCreateProfile} className="px-3 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-sm font-bold" title="Tạo Profile mới từ cài đặt hiện tại">+</button>
+                                <button onClick={handleDeleteProfile} disabled={!activeProfileId} className="px-3 py-2 bg-red-900/50 hover:bg-red-900 text-red-200 rounded text-sm font-bold disabled:opacity-50" title="Xóa Profile">✕</button>
+                            </div>
+                        </div>
+                        {/* ------------------------------- */}
+
                         {/* Protocol Selection */}
                         <div className="bg-slate-900/50 p-4 rounded-lg border border-slate-700">
                             <label className="block text-sm font-bold text-sky-400 mb-3">Giao thức Proxy</label>

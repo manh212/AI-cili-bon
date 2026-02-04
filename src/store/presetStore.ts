@@ -177,7 +177,8 @@ export const usePresetStore = create<PresetState & PresetActions>()(
             const newPreset = JSON.parse(JSON.stringify(defaultPreset));
             newPreset.name = name;
             newPreset.comment = "Preset mới được tạo.";
-            // Use default prompts to make it immediately usable
+            // Empty the prompts array for a clean start
+            newPreset.prompts = [];
             
             await dbService.savePreset(newPreset);
             
