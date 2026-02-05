@@ -7,11 +7,12 @@ const PROXY_URL_KEY = 'sillyTavernStudio_proxyUrl';
 const PROXY_PASSWORD_KEY = 'sillyTavernStudio_proxyPassword';
 const PROXY_LEGACY_MODE_KEY = 'sillyTavernStudio_proxyLegacyMode';
 const PROXY_FOR_TOOLS_KEY = 'sillyTavernStudio_proxyForTools';
-const PROXY_PROFILES_KEY = 'sillyTavernStudio_proxyProfiles'; // NEW KEY
+const PROXY_PROFILES_KEY = 'sillyTavernStudio_proxyProfiles';
+const PROXY_MODELS_KEY = 'sillyTavernStudio_proxyModels'; // NEW KEY
 const GLOBAL_CONNECTION_KEY = 'sillyTavernStudio_globalConnection';
 const GLOBAL_SMART_SCAN_KEY = 'sillyTavernStudio_smartScanGlobal';
 const GLOBAL_CONTEXT_KEY = 'sillyTavernStudio_globalContext';
-const GLOBAL_TTS_KEY = 'sillyTavernStudio_ttsGlobal'; // NEW KEY
+const GLOBAL_TTS_KEY = 'sillyTavernStudio_ttsGlobal';
 
 // ... (Existing options and interfaces remain same) ...
 export const MODEL_OPTIONS = [
@@ -330,7 +331,7 @@ export const saveGlobalTTSSettings = (settings: GlobalTTSSettings): void => {
     localStorage.setItem(GLOBAL_TTS_KEY, JSON.stringify(settings));
 };
 
-// --- PROXY PROFILES (NEW) ---
+// --- PROXY PROFILES ---
 export const getProxyProfiles = (): ProxyProfile[] => {
     try {
         const stored = localStorage.getItem(PROXY_PROFILES_KEY);
@@ -345,6 +346,28 @@ export const getProxyProfiles = (): ProxyProfile[] => {
 
 export const saveProxyProfiles = (profiles: ProxyProfile[]): void => {
     localStorage.setItem(PROXY_PROFILES_KEY, JSON.stringify(profiles));
+};
+
+// --- STORED PROXY MODELS (NEW) ---
+export interface StoredProxyModel {
+    id: string;
+    name: string;
+}
+
+export const getStoredProxyModels = (): StoredProxyModel[] => {
+    try {
+        const stored = localStorage.getItem(PROXY_MODELS_KEY);
+        if (stored) {
+            return JSON.parse(stored);
+        }
+    } catch (e) {
+        console.error("Failed to load stored proxy models", e);
+    }
+    return [];
+};
+
+export const saveStoredProxyModels = (models: StoredProxyModel[]): void => {
+    localStorage.setItem(PROXY_MODELS_KEY, JSON.stringify(models));
 };
 // -----------------------------------
 
@@ -462,7 +485,7 @@ export const getAllLocalStorageData = (): Record<string, any> => {
         OPENROUTER_API_KEY_KEY, PROXY_URL_KEY, PROXY_PASSWORD_KEY, 
         PROXY_LEGACY_MODE_KEY, PROXY_FOR_TOOLS_KEY, GLOBAL_CONNECTION_KEY,
         GLOBAL_SMART_SCAN_KEY, GLOBAL_CONTEXT_KEY, GLOBAL_TTS_KEY,
-        PROXY_PROFILES_KEY // Included profiles in backup
+        PROXY_PROFILES_KEY, PROXY_MODELS_KEY // Added models for backup
     ];
     
     keys.forEach(key => {

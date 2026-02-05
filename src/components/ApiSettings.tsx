@@ -19,12 +19,16 @@ import {
     saveProxyForTools,
     getProxyProfiles,
     saveProxyProfiles,
+    getStoredProxyModels,
+    saveStoredProxyModels,
     GlobalConnectionSettings,
     CompletionSource,
     ProxyProtocol,
-    ProxyProfile
+    ProxyProfile,
+    StoredProxyModel
 } from '../services/settingsService';
 import { validateOpenRouterKey, getOpenRouterModels } from '../services/geminiService';
+import { fetchProxyModels } from '../services/api/proxyApi';
 import type { OpenRouterModel } from '../types';
 import { Loader } from './Loader';
 import { ToggleInput } from './ui/ToggleInput';
@@ -38,13 +42,13 @@ const ModelSelectorWithCustom: React.FC<{
     description?: string;
     value: string;
     onChange: (val: string) => void;
-    options?: { id: string; name: string }[];
-}> = ({ label, value, onChange, options = MODEL_OPTIONS }) => {
+    options: { id: string; name: string }[];
+}> = ({ label, value, onChange, options }) => {
     const isKnownOption = useMemo(() => {
         return options.some(opt => opt.id === value);
     }, [value, options]);
 
-    const showInput = !isKnownOption;
+    const showInput = !isKnownOption && value !== '';
 
     return (
         <div className="bg-slate-900/50 p-4 rounded-lg border border-slate-700">
@@ -65,7 +69,8 @@ const ModelSelectorWithCustom: React.FC<{
                 <option value="custom_option">Khác (Tự nhập Model ID)</option>
             </select>
 
-            {showInput && (
+            {/* Always show input if custom is selected or if value is unknown */}
+            {(!isKnownOption || value === '') && (
                 <div className="animate-fade-in-up">
                     <input
                         type="text"
@@ -106,6 +111,8 @@ export const ApiSettings: React.FC = () => {
     const [isPingingProxy, setIsPingingProxy] = useState(false);
     const [proxyPingStatus, setProxyPingStatus] = useState<'idle' | 'success' | 'error'>('idle');
     const [proxyErrorMessage, setProxyErrorMessage] = useState('');
+    const [proxyModelList, setProxyModelList] = useState<StoredProxyModel[]>([]);
+    const [isLoadingModels, setIsLoadingModels] = useState(false);
 
     // Proxy Profile State
     const [profiles, setProfiles] = useState<ProxyProfile[]>([]);
@@ -129,6 +136,7 @@ export const ApiSettings: React.FC = () => {
         setProxyPassword(getProxyPassword());
         setProxyLegacyMode(getProxyLegacyMode());
         setProxyForTools(getProxyForTools());
+        setProxyModelList(getStoredProxyModels());
         
         setConnection(getConnectionSettings());
         setProfiles(getProxyProfiles());
@@ -157,6 +165,7 @@ export const ApiSettings: React.FC = () => {
             saveProxyPassword(proxyPassword);
             saveProxyLegacyMode(proxyLegacyMode);
             saveProxyForTools(proxyForTools);
+            saveStoredProxyModels(proxyModelList); // Save loaded models
 
             setSaveStatus('saved');
             setTimeout(() => setSaveStatus('idle'), 2000);
@@ -245,6 +254,27 @@ export const ApiSettings: React.FC = () => {
             setProxyPingStatus('error');
         } finally {
             setIsPingingProxy(false);
+        }
+    };
+
+    // Load Models from Proxy
+    const handleLoadProxyModels = async () => {
+        if (!proxyUrl) {
+            showToast("Vui lòng nhập Proxy URL.", "warning");
+            return;
+        }
+        
+        setIsLoadingModels(true);
+        try {
+            const models = await fetchProxyModels(proxyUrl, proxyPassword, proxyLegacyMode);
+            setProxyModelList(models);
+            saveStoredProxyModels(models); // Auto save
+            showToast(`Đã tải ${models.length} models từ Proxy.`, "success");
+        } catch (e: any) {
+            console.error(e);
+            showToast(`Lỗi tải models: ${e.message}`, "error");
+        } finally {
+            setIsLoadingModels(false);
         }
     };
 
@@ -395,6 +425,9 @@ export const ApiSettings: React.FC = () => {
         </button>
     );
 
+    // Determine which list to use: Fetched or Default
+    const effectiveProxyModels = proxyModelList.length > 0 ? proxyModelList : PROXY_MODEL_OPTIONS;
+
     return (
         <div className="bg-slate-800/50 p-6 rounded-xl shadow-lg max-w-3xl mx-auto space-y-8">
             {/* 1. SOURCE SELECTOR */}
@@ -535,6 +568,57 @@ export const ApiSettings: React.FC = () => {
                         </div>
                         {/* ------------------------------- */}
 
+                        <div className="space-y-4 border border-slate-700 p-4 rounded-lg bg-slate-900/30">
+                            <div>
+                                <label className="block text-sm font-medium text-slate-300 mb-1">Proxy URL</label>
+                                <div className="flex gap-2">
+                                    <input
+                                        type="text"
+                                        value={proxyUrl}
+                                        onChange={e => setProxyUrl(e.target.value)}
+                                        className="flex-grow bg-slate-700 border border-slate-600 rounded-md p-2 text-white font-mono text-sm"
+                                        placeholder="http://127.0.0.1:8889"
+                                    />
+                                    {/* Load Models Button */}
+                                    <button 
+                                        onClick={handleLoadProxyModels} 
+                                        disabled={isLoadingModels} 
+                                        className="px-3 bg-slate-700 text-slate-300 rounded hover:bg-slate-600 flex items-center justify-center"
+                                        title="Tải danh sách Model từ Proxy"
+                                    >
+                                        {isLoadingModels ? (
+                                            <Loader message="" /> 
+                                        ) : (
+                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                                <path fillRule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clipRule="evenodd" />
+                                            </svg>
+                                        )}
+                                    </button>
+                                    <button onClick={handlePingProxy} disabled={isPingingProxy} className="px-4 bg-indigo-600 text-white rounded hover:bg-indigo-500 disabled:bg-slate-600">
+                                        Ping
+                                    </button>
+                                </div>
+                                {proxyPingStatus === 'success' && <p className="text-xs text-green-400 mt-1">Kết nối OK.</p>}
+                                {proxyPingStatus === 'error' && <p className="text-xs text-red-400 mt-1">Lỗi: {proxyErrorMessage}</p>}
+                            </div>
+
+                            <LabeledInput 
+                                label="Password / Key"
+                                value={proxyPassword}
+                                onChange={e => setProxyPassword(e.target.value)}
+                                type="password"
+                            />
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
+                                <div>
+                                    <ToggleInput label="Legacy Mode" checked={proxyLegacyMode} onChange={setProxyLegacyMode} />
+                                </div>
+                                <div>
+                                    <ToggleInput label="Proxy cho Tools" checked={proxyForTools} onChange={setProxyForTools} />
+                                </div>
+                            </div>
+                        </div>
+
                         {/* Protocol Selection */}
                         <div className="bg-slate-900/50 p-4 rounded-lg border border-slate-700">
                             <label className="block text-sm font-bold text-sky-400 mb-3">Giao thức Proxy</label>
@@ -568,7 +652,7 @@ export const ApiSettings: React.FC = () => {
                                 label="Chat Model ID"
                                 value={connection.proxy_model}
                                 onChange={(val) => updateConnection('proxy_model', val)}
-                                options={PROXY_MODEL_OPTIONS}
+                                options={effectiveProxyModels}
                             />
 
                             {/* Tool Model Selector */}
@@ -576,44 +660,8 @@ export const ApiSettings: React.FC = () => {
                                 label="Tool Model ID"
                                 value={connection.proxy_tool_model}
                                 onChange={(val) => updateConnection('proxy_tool_model', val)}
-                                options={PROXY_MODEL_OPTIONS}
+                                options={effectiveProxyModels}
                             />
-                        </div>
-
-                        <div className="space-y-4 border-t border-slate-700 pt-4">
-                            <div>
-                                <label className="block text-sm font-medium text-slate-300 mb-1">Proxy URL</label>
-                                <div className="flex gap-2">
-                                    <input
-                                        type="text"
-                                        value={proxyUrl}
-                                        onChange={e => setProxyUrl(e.target.value)}
-                                        className="flex-grow bg-slate-700 border border-slate-600 rounded-md p-2 text-white font-mono text-sm"
-                                        placeholder="http://127.0.0.1:8889"
-                                    />
-                                    <button onClick={handlePingProxy} disabled={isPingingProxy} className="px-4 bg-indigo-600 text-white rounded hover:bg-indigo-500 disabled:bg-slate-600">
-                                        Ping
-                                    </button>
-                                </div>
-                                {proxyPingStatus === 'success' && <p className="text-xs text-green-400 mt-1">Kết nối OK.</p>}
-                                {proxyPingStatus === 'error' && <p className="text-xs text-red-400 mt-1">Lỗi: {proxyErrorMessage}</p>}
-                            </div>
-
-                            <LabeledInput 
-                                label="Password / Key"
-                                value={proxyPassword}
-                                onChange={e => setProxyPassword(e.target.value)}
-                                type="password"
-                            />
-
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
-                                <div>
-                                    <ToggleInput label="Legacy Mode" checked={proxyLegacyMode} onChange={setProxyLegacyMode} />
-                                </div>
-                                <div>
-                                    <ToggleInput label="Proxy cho Tools" checked={proxyForTools} onChange={setProxyForTools} />
-                                </div>
-                            </div>
                         </div>
                     </div>
                 )}

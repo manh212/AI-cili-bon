@@ -200,3 +200,45 @@ export async function* callProxyStream(
         throw e;
     }
 }
+
+/**
+ * Fetch list of models from Proxy
+ */
+export const fetchProxyModels = async (
+    url: string,
+    password?: string,
+    isLegacyMode?: boolean
+): Promise<{ id: string; name: string }[]> => {
+    const cleanUrl = url.trim().replace(/\/$/, '');
+    const endpoint = `${cleanUrl}/v1/models`;
+
+    const headers: Record<string, string> = {};
+    if (!isLegacyMode) {
+        headers['Content-Type'] = 'application/json';
+        if (password) headers['Authorization'] = `Bearer ${password}`;
+    }
+
+    try {
+        const response = await fetch(endpoint, {
+            method: 'GET',
+            headers
+        });
+
+        if (!response.ok) {
+            throw new Error(`Failed to fetch models: ${response.status}`);
+        }
+
+        const data = await response.json();
+        
+        // Handle standard OpenAI response format: { object: 'list', data: [...] }
+        const list = Array.isArray(data.data) ? data.data : (Array.isArray(data) ? data : []);
+        
+        return list.map((m: any) => ({
+            id: m.id,
+            name: m.id // Use ID as name for simplicity, or m.object if needed
+        })).sort((a: any, b: any) => a.id.localeCompare(b.id));
+
+    } catch (e) {
+        throw e;
+    }
+};
