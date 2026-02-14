@@ -214,6 +214,13 @@ const MessageListComponent: React.FC<MessageListProps> = ({
                 const canRegenerate = !isLoading && msg.role !== 'system' && (isLastModelMessage || isLastMessage);
                 const canDelete = !isLoading;
 
+                // --- RAW STREAMING LOGIC ---
+                // Chỉ bật chế độ Raw Stream nếu:
+                // 1. Hệ thống đang tải (isLoading)
+                // 2. Đây là tin nhắn cuối cùng (isLastMessage)
+                // 3. Tin nhắn là của AI (msg.role === 'model')
+                const isStreaming = isLoading && isLastMessage && msg.role === 'model';
+
                 const menuActions = [
                     { label: 'Chỉnh sửa', onClick: () => onStartEdit(msg) },
                     { label: 'Ghi chú của Tác giả', onClick: onOpenAuthorNote },
@@ -246,6 +253,7 @@ const MessageListComponent: React.FC<MessageListProps> = ({
                                 onCancel={onCancelEdit}
                                 menuActions={menuActions}
                                 isImmersive={isImmersive}
+                                isStreaming={isStreaming} // Pass the prop here
                             />
                         )}
 

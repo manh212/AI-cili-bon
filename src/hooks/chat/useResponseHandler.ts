@@ -33,7 +33,7 @@ const extractChoices = (text: string): QuickReply[] => {
 };
 
 export const useResponseHandler = () => {
-    const { setVariables, addMessage, updateMessage, variables, card, setQuickReplies } = useChatStore();
+    const { setVariables, addMessage, updateMessage, variables, card, setQuickReplies, visualState } = useChatStore();
 
     const processAIResponse = useCallback(async (rawText: string, messageId: string) => {
         // 0. Trích xuất CHOICE (Quick Replies) trước khi làm sạch văn bản
@@ -49,12 +49,20 @@ export const useResponseHandler = () => {
         }
 
         // 1. Cập nhật biến số (Variable Engine)
+        // Luôn chạy Variable Engine để đảm bảo trạng thái game được cập nhật (ví dụ: HP, Thiện cảm)
         const { updatedVariables, cleanedText } = processVariableUpdates(rawText, variables);
         setVariables(updatedVariables);
 
-        // 2. Chạy Regex và trích xuất HTML (Regex Service)
-        const scripts = card?.extensions?.regex_scripts || [];
-        const { displayContent, interactiveHtml } = processWithRegex(cleanedText, scripts, [2]);
+        let displayContent = cleanedText;
+        let interactiveHtml: string | null = null;
+
+        // 2. Chạy Regex và trích xuất HTML (Regex Service) - Chỉ khi KHÔNG tắt tương tác
+        if (!visualState.disableInteractiveMode) {
+            const scripts = card?.extensions?.regex_scripts || [];
+            const result = processWithRegex(cleanedText, scripts, [2]);
+            displayContent = result.displayContent;
+            interactiveHtml = result.interactiveHtml;
+        }
 
         // 3. Cập nhật tin nhắn trong Store
         updateMessage(messageId, {
@@ -65,7 +73,7 @@ export const useResponseHandler = () => {
         });
 
         return { updatedVariables, displayContent, interactiveHtml };
-    }, [variables, card, setVariables, updateMessage, setQuickReplies]);
+    }, [variables, card, setVariables, updateMessage, setQuickReplies, visualState.disableInteractiveMode]);
 
     const createPlaceholderMessage = useCallback((role: 'model' | 'user' | 'system'): ChatMessage => {
         return {

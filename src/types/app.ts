@@ -71,6 +71,9 @@ export interface VisualState {
     systemSoundEnabled?: boolean; // Mặc định true
     aiSoundUrl?: string; // Custom URL cho AI
     rpgSoundUrl?: string; // Custom URL cho RPG
+    
+    // NEW: Tùy chọn tắt chế độ tương tác (HTML/Script/Regex)
+    disableInteractiveMode?: boolean;
 }
 
 // NEW: Trạng thái lỗi tương tác cho Modal

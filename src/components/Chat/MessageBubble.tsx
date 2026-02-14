@@ -121,6 +121,7 @@ interface MessageBubbleProps {
     onCancel: () => void;
     menuActions: MessageMenuAction[];
     isImmersive: boolean;
+    isStreaming?: boolean; // NEW PROP: Flag for raw streaming
 }
 
 const MessageBubbleComponent: React.FC<MessageBubbleProps> = ({ 
@@ -132,7 +133,8 @@ const MessageBubbleComponent: React.FC<MessageBubbleProps> = ({
     onSave, 
     onCancel, 
     menuActions, 
-    isImmersive 
+    isImmersive,
+    isStreaming = false 
 }) => {
     const { activePersona } = useUserPersona();
     const { showToast } = useToast();
@@ -153,7 +155,9 @@ const MessageBubbleComponent: React.FC<MessageBubbleProps> = ({
     const ttsPitch = ttsSettings.tts_pitch ?? 1;
 
     const { mainHtml, thinkingBlocks } = useMemo(() => {
-        if (isUser || !message.content) {
+        // PERFORMANCE OPTIMIZATION:
+        // If streaming, skip heavy parsing completely. Return placeholders.
+        if (isUser || !message.content || isStreaming) {
             return { mainHtml: '', thinkingBlocks: [] };
         }
 
@@ -187,7 +191,7 @@ const MessageBubbleComponent: React.FC<MessageBubbleProps> = ({
         });
         
         return { mainHtml: sanitized, thinkingBlocks: foundThinkingBlocks };
-    }, [isUser, message.content, activePersona]);
+    }, [isUser, message.content, activePersona, isStreaming]); // Added isStreaming to dependencies
     
     useEffect(() => {
         if (isEditing && textareaRef.current) {
@@ -267,7 +271,7 @@ const MessageBubbleComponent: React.FC<MessageBubbleProps> = ({
             )}
             <div className={`rounded-lg px-4 py-2 max-w-lg shadow-sm relative ${isUser ? 'bg-sky-600 text-white rounded-br-none' : 'bg-slate-700/90 backdrop-blur-md text-slate-200 rounded-bl-none'}`}>
                 {/* TTS Button */}
-                {!isUser && ttsEnabled && (
+                {!isUser && ttsEnabled && !isStreaming && (
                     <div className="absolute -top-3 -right-2 flex items-center gap-1">
                         
                         <button 
@@ -297,13 +301,26 @@ const MessageBubbleComponent: React.FC<MessageBubbleProps> = ({
                      <p className="whitespace-pre-wrap">{message.content}</p>
                 ) : (
                     <>
-                        {thinkingBlocks.map((block, idx) => (
-                            <ThinkingReveal key={idx} content={block.content} label={block.label} />
-                        ))}
-                        <div
-                            className="markdown-content"
-                            dangerouslySetInnerHTML={{ __html: mainHtml }}
-                        />
+                        {/* 
+                            RAW STREAMING MODE: 
+                            If streaming, show RAW text (Method A: show <thinking> etc). 
+                            No markdown parsing, no html cleaning, no React rendering overhead.
+                        */}
+                        {isStreaming ? (
+                            <div className="whitespace-pre-wrap font-sans text-sm leading-relaxed">
+                                {message.content}
+                            </div>
+                        ) : (
+                            <>
+                                {thinkingBlocks.map((block, idx) => (
+                                    <ThinkingReveal key={idx} content={block.content} label={block.label} />
+                                ))}
+                                <div
+                                    className="markdown-content"
+                                    dangerouslySetInnerHTML={{ __html: mainHtml }}
+                                />
+                            </>
+                        )}
                     </>
                 )}
             </div>
@@ -330,6 +347,7 @@ export const MessageBubble = memo(MessageBubbleComponent, (prev, next) => {
         prev.editingContent === next.editingContent &&
         prev.avatarUrl === next.avatarUrl &&
         prev.isImmersive === next.isImmersive &&
+        prev.isStreaming === next.isStreaming && // Important: Re-render if streaming state changes
         compareMenuActions(prev.menuActions, next.menuActions)
     );
 });

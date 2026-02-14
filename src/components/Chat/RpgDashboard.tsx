@@ -1,10 +1,11 @@
 
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import type { RPGDatabase, RPGTable } from '../../types/rpg';
 import { useChatStore } from '../../store/chatStore';
 import { useCharacter } from '../../contexts/CharacterContext'; 
 import { useToast } from '../ToastSystem';
 import { RpgRowItem } from './RpgTableComponents';
+import { parseLooseJson } from '../../utils';
 
 interface RpgDashboardProps {
     data: RPGDatabase | undefined;
@@ -209,19 +210,212 @@ const InteractiveListView: React.FC<{ table: RPGTable }> = ({ table }) => {
     );
 };
 
+// --- DATA MANAGER COMPONENT ---
+
+const DataManagerView: React.FC<{ 
+    database: RPGDatabase, 
+    onImport: (newDb: RPGDatabase) => void 
+}> = ({ database, onImport }) => {
+    const { showToast } = useToast();
+    const [importMode, setImportMode] = useState<'merge' | 'overwrite'>('merge');
+    const [jsonInput, setJsonInput] = useState('');
+    const fileInputRef = useRef<HTMLInputElement>(null);
+
+    // EXPORT
+    const handleExport = () => {
+        const exportData = JSON.parse(JSON.stringify(database));
+        // Add meta info
+        exportData.meta = {
+            exportedAt: new Date().toISOString(),
+            type: 'mythic_rpg_full_save'
+        };
+
+        const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `MythicRPG_Data_${Date.now()}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        showToast("Đã tải xuống file dữ liệu!", "success");
+    };
+
+    // IMPORT LOGIC
+    const processImport = (rawData: any) => {
+        try {
+            // Handle different wrapper formats
+            let importedDb = rawData;
+            
+            // Check if it's a full snapshot or just RPG part
+            if (rawData.data && rawData.data.tables) {
+                 importedDb = rawData.data; // Snapshot wrapper
+            } else if (rawData.template && rawData.template.tables) {
+                 importedDb = rawData.template; // Config wrapper
+            }
+
+            // Validation
+            if (!importedDb.tables || !Array.isArray(importedDb.tables)) {
+                throw new Error("Cấu trúc file không hợp lệ (Thiếu danh sách bảng).");
+            }
+
+            // Execution
+            if (importMode === 'overwrite') {
+                onImport(importedDb);
+                showToast("Đã ghi đè dữ liệu thành công!", "success");
+            } else {
+                // Merge Logic
+                const mergedDb = JSON.parse(JSON.stringify(database));
+                const currentTables = mergedDb.tables as RPGTable[];
+
+                importedDb.tables.forEach((impTable: RPGTable) => {
+                    const existingIdx = currentTables.findIndex(t => t.config.id === impTable.config.id);
+                    if (existingIdx !== -1) {
+                        // Table exists: Merge Rows
+                        // Strategy: Append new rows.
+                        // (Ideally we check for UUID dupes but simple append is safer for "Merge")
+                        const existingTable = currentTables[existingIdx];
+                        if (impTable.data?.rows) {
+                             existingTable.data.rows = [...existingTable.data.rows, ...impTable.data.rows];
+                        }
+                    } else {
+                        // Table new: Add table
+                        currentTables.push(impTable);
+                    }
+                });
+                
+                mergedDb.lastUpdated = Date.now();
+                onImport(mergedDb);
+                showToast("Đã gộp dữ liệu thành công!", "success");
+            }
+
+        } catch (e) {
+            showToast(`Lỗi nhập liệu: ${e instanceof Error ? e.message : String(e)}`, "error");
+        }
+    };
+
+    const handleFileImport = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+            try {
+                const json = JSON.parse(ev.target?.result as string);
+                processImport(json);
+                e.target.value = ''; // Reset
+            } catch (err) {
+                showToast("Lỗi đọc file JSON.", "error");
+            }
+        };
+        reader.readAsText(file);
+    };
+
+    const handleTextImport = () => {
+        if (!jsonInput.trim()) return;
+        try {
+            const json = parseLooseJson(jsonInput);
+            processImport(json);
+            setJsonInput('');
+        } catch (e) {
+            showToast("Văn bản JSON không hợp lệ.", "error");
+        }
+    };
+
+    return (
+        <div className="p-6 h-full overflow-y-auto custom-scrollbar flex flex-col gap-8">
+            <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-6 text-center">
+                <div className="text-4xl mb-4">📤</div>
+                <h3 className="text-lg font-bold text-emerald-400 mb-2">Xuất Dữ Liệu</h3>
+                <p className="text-sm text-slate-400 mb-4">Lưu toàn bộ bảng và dữ liệu hiện tại về máy.</p>
+                <button 
+                    onClick={handleExport}
+                    className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg shadow-lg transition-transform active:scale-95 flex items-center justify-center gap-2"
+                >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clipRule="evenodd" /></svg>
+                    Tải xuống (Full Save)
+                </button>
+            </div>
+
+            <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-6">
+                <div className="flex items-center gap-2 mb-4">
+                    <span className="text-2xl">📥</span>
+                    <h3 className="text-lg font-bold text-sky-400">Nhập Dữ Liệu</h3>
+                </div>
+
+                {/* Mode Selector */}
+                <div className="flex gap-4 mb-6 bg-slate-900/50 p-2 rounded-lg border border-slate-700/50">
+                    <label className="flex-1 flex items-center justify-center gap-2 cursor-pointer p-2 rounded transition-colors hover:bg-slate-800">
+                        <input 
+                            type="radio" 
+                            name="importMode" 
+                            checked={importMode === 'merge'} 
+                            onChange={() => setImportMode('merge')} 
+                            className="accent-sky-500"
+                        />
+                        <span className={importMode === 'merge' ? 'text-sky-400 font-bold' : 'text-slate-400'}>Gộp (Merge)</span>
+                    </label>
+                    <label className="flex-1 flex items-center justify-center gap-2 cursor-pointer p-2 rounded transition-colors hover:bg-slate-800">
+                        <input 
+                            type="radio" 
+                            name="importMode" 
+                            checked={importMode === 'overwrite'} 
+                            onChange={() => setImportMode('overwrite')} 
+                            className="accent-red-500"
+                        />
+                        <span className={importMode === 'overwrite' ? 'text-red-400 font-bold' : 'text-slate-400'}>Ghi đè (Overwrite)</span>
+                    </label>
+                </div>
+
+                <div className="space-y-4">
+                    <div className="grid grid-cols-1 gap-2">
+                        <button 
+                            onClick={() => fileInputRef.current?.click()}
+                            className="w-full py-4 border-2 border-dashed border-slate-600 hover:border-sky-500 rounded-lg text-slate-400 hover:text-sky-400 transition-colors flex flex-col items-center justify-center gap-1"
+                        >
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                            <span>Chọn file JSON</span>
+                        </button>
+                        <input type="file" ref={fileInputRef} className="hidden" accept=".json" onChange={handleFileImport} />
+                    </div>
+
+                    <div className="relative">
+                        <textarea 
+                            value={jsonInput}
+                            onChange={(e) => setJsonInput(e.target.value)}
+                            placeholder="Hoặc dán mã JSON vào đây..."
+                            rows={3}
+                            className="w-full bg-slate-900 border border-slate-600 rounded-lg p-3 text-xs font-mono text-slate-300 focus:ring-1 focus:ring-sky-500"
+                        />
+                        <button 
+                            onClick={handleTextImport}
+                            disabled={!jsonInput.trim()}
+                            className="absolute bottom-2 right-2 px-3 py-1 bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold rounded shadow disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            Nhập Ngay
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+};
+
 // --- MAIN COMPONENT ---
 
 export const RpgDashboard: React.FC<RpgDashboardProps> = ({ data, isOpen, onClose }) => {
-    const [activeTabId, setActiveTabId] = useState<string | null>(null);
+    // We use "activeView" to track if we show a specific table (by ID) or the settings page.
+    const [activeView, setActiveView] = useState<string | null>(null);
     
     // Store Actions
-    const { reloadRpgConfig, card } = useChatStore();
+    const { reloadRpgConfig, card, setSessionData } = useChatStore();
     const { characters } = useCharacter();
     const { showToast } = useToast();
 
+    // Auto-select first table if nothing selected
     useMemo(() => {
-        if (isOpen && !activeTabId && data?.tables?.length) {
-            setActiveTabId(data.tables[0].config.id);
+        if (isOpen && !activeView && data?.tables?.length) {
+            setActiveView(data.tables[0].config.id);
         }
     }, [isOpen, data]);
 
@@ -239,16 +433,35 @@ export const RpgDashboard: React.FC<RpgDashboardProps> = ({ data, isOpen, onClos
         showToast("Đã đồng bộ cấu hình từ thẻ gốc thành công!", "success");
     };
 
+    const handleCopyTable = (table: RPGTable) => {
+        try {
+            const json = JSON.stringify(table, null, 2);
+            navigator.clipboard.writeText(json);
+            showToast(`Đã sao chép bảng "${table.config.name}" vào clipboard.`, "success");
+        } catch (e) {
+            showToast("Lỗi sao chép bảng.", "error");
+        }
+    };
+
+    // Update the DB in store (Import logic)
+    const handleUpdateDb = (newDb: RPGDatabase) => {
+        if (!card) return;
+        const updatedCard = { ...card, rpg_data: newDb };
+        // Update session data (which updates context)
+        setSessionData({ card: updatedCard });
+    };
+
     if (!isOpen || !data) return null;
 
-    const activeTable = data.tables ? data.tables.find(t => t.config.id === activeTabId) : undefined;
+    const activeTable = data.tables ? data.tables.find(t => t.config.id === activeView) : undefined;
+    const isSettingsView = activeView === 'data_manager';
 
     return (
         <div className="fixed inset-y-0 right-0 z-[100] w-[600px] max-w-full bg-slate-900/95 backdrop-blur-xl border-l border-slate-700 shadow-2xl flex flex-col transform transition-transform animate-slide-in-right">
             <div className="p-4 border-b border-slate-700 flex justify-between items-center bg-slate-800/50">
                 <div>
                     <h2 className="text-xl font-bold text-sky-400 flex items-center gap-2">
-                        <span>⚔️</span> Mythic Dashboard (V2)
+                        <span>⚔️</span> Mythic Dashboard
                     </h2>
                     <p className="text-xs text-slate-400 font-mono mt-1">
                         Live Editor • Update: {data.lastUpdated ? new Date(data.lastUpdated).toLocaleTimeString() : 'N/A'}
@@ -278,29 +491,63 @@ export const RpgDashboard: React.FC<RpgDashboardProps> = ({ data, isOpen, onClos
 
             <div className="flex-grow flex overflow-hidden">
                 {/* Sidebar Tables */}
-                <div className="w-40 bg-slate-950 border-r border-slate-800 flex flex-col py-2 shrink-0 overflow-y-auto custom-scrollbar">
-                    {data.tables && data.tables.map(table => {
-                        const isActive = table.config.id === activeTabId;
-                        return (
-                            <button
-                                key={table.config.id}
-                                onClick={() => setActiveTabId(table.config.id)}
-                                className={`px-3 py-3 text-left text-sm font-medium transition-colors border-l-4 ${
-                                    isActive 
-                                    ? 'bg-slate-800 text-sky-400 border-sky-500' 
-                                    : 'border-transparent text-slate-400 hover:bg-slate-900 hover:text-slate-200'
-                                }`}
-                            >
-                                <div className="truncate">{table.config.name}</div>
-                                <div className="text-[10px] text-slate-600 font-normal mt-0.5">{table.data.rows.length} records</div>
-                            </button>
-                        );
-                    })}
+                <div className="w-44 bg-slate-950 border-r border-slate-800 flex flex-col shrink-0">
+                    <div className="flex-grow overflow-y-auto custom-scrollbar py-2">
+                        {data.tables && data.tables.map(table => {
+                            const isActive = table.config.id === activeView;
+                            return (
+                                <div key={table.config.id} className="flex items-center group">
+                                    <button
+                                        onClick={() => setActiveView(table.config.id)}
+                                        className={`flex-grow px-3 py-3 text-left text-sm font-medium transition-colors border-l-4 ${
+                                            isActive 
+                                            ? 'bg-slate-800 text-sky-400 border-sky-500' 
+                                            : 'border-transparent text-slate-400 hover:bg-slate-900 hover:text-slate-200'
+                                        }`}
+                                    >
+                                        <div className="truncate">{table.config.name}</div>
+                                        <div className="text-[10px] text-slate-600 font-normal mt-0.5">{table.data.rows.length} rows</div>
+                                    </button>
+                                    
+                                    {/* Copy Button */}
+                                    <button 
+                                        onClick={(e) => { e.stopPropagation(); handleCopyTable(table); }}
+                                        className="p-2 text-slate-600 hover:text-sky-400 opacity-0 group-hover:opacity-100 transition-opacity"
+                                        title="Sao chép bảng này"
+                                    >
+                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                                            <path d="M8 3a1 1 0 011-1h2a1 1 0 110 2H9a1 1 0 01-1-1z" />
+                                            <path d="M6 3a2 2 0 00-2 2v11a2 2 0 002 2h8a2 2 0 002-2V5a2 2 0 00-2-2 3 3 0 01-3 3H9a3 3 0 01-3-3z" />
+                                        </svg>
+                                    </button>
+                                </div>
+                            );
+                        })}
+                    </div>
+
+                    {/* Data Manager Button */}
+                    <div className="p-2 border-t border-slate-800">
+                        <button 
+                            onClick={() => setActiveView('data_manager')}
+                            className={`w-full py-2 px-3 rounded text-xs font-bold flex items-center justify-center gap-2 transition-colors ${
+                                activeView === 'data_manager'
+                                ? 'bg-sky-900/50 text-sky-400 border border-sky-500/30'
+                                : 'bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-white border border-slate-700'
+                            }`}
+                        >
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                                <path fillRule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clipRule="evenodd" />
+                            </svg>
+                            Quản lý Dữ liệu
+                        </button>
+                    </div>
                 </div>
 
                 {/* Main Content */}
                 <div className="flex-grow overflow-hidden bg-slate-900/50 flex flex-col relative">
-                    {activeTable ? (
+                    {isSettingsView ? (
+                        <DataManagerView database={data} onImport={handleUpdateDb} />
+                    ) : activeTable ? (
                         <div className="flex flex-col h-full p-4 gap-4">
                             <div className="flex justify-between items-end border-b border-slate-700/50 pb-2 shrink-0">
                                 <div>
