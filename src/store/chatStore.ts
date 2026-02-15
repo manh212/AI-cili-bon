@@ -60,6 +60,10 @@ interface ChatState {
     isAutoLooping: boolean;
     error: string | null;
     
+    // Arena Mode State
+    isArenaMode: boolean;
+    arenaModelId: string | null; // The challenger model ID
+
     abortController: AbortController | null;
 }
 
@@ -98,6 +102,10 @@ interface ChatActions {
     setError: (error: string | null) => void;
     setAbortController: (ac: AbortController | null) => void;
 
+    // Arena Actions
+    setArenaMode: (enabled: boolean) => void;
+    setArenaModelId: (modelId: string) => void;
+
     clearLogs: () => void;
     resetStore: () => void;
 
@@ -120,7 +128,8 @@ const initialState: Omit<ChatState, 'abortController'> = {
     lastStateBlock: '', initialDiagnosticLog: '', rpgNotification: null, generatedLorebookEntries: [],
     visualState: {}, quickReplies: [], scriptButtons: [],
     logs: { turns: [], systemLog: [], worldInfoLog: [], smartScanLog: [], mythicLog: [], networkLog: [] },
-    isLoading: false, isSummarizing: false, isInputLocked: false, isAutoLooping: false, error: null
+    isLoading: false, isSummarizing: false, isInputLocked: false, isAutoLooping: false, error: null,
+    isArenaMode: false, arenaModelId: null
 };
 
 export const useChatStore = create<ChatState & ChatActions>()(
@@ -177,6 +186,9 @@ export const useChatStore = create<ChatState & ChatActions>()(
         setLoading: (loading) => set((state) => { state.isLoading = loading; }),
         setError: (error) => set((state) => { state.error = error; }),
         setAbortController: (ac) => set((state) => { state.abortController = ac; }),
+
+        setArenaMode: (enabled) => set((state) => { state.isArenaMode = enabled; }),
+        setArenaModelId: (modelId) => set((state) => { state.arenaModelId = modelId; }),
 
         clearLogs: () => set((state) => { state.logs = { turns: [], systemLog: [], worldInfoLog: [], smartScanLog: [], mythicLog: [], networkLog: [] }; }),
         resetStore: () => set((state) => { Object.assign(state, initialState); state.abortController = null; }),

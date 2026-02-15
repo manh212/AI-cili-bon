@@ -100,9 +100,6 @@ export const ChatTester: React.FC<ChatTesterProps> = ({ sessionId, onBack }) => 
         );
     }
 
-    // REMOVED BLOCKING ERROR SCREEN
-    // Instead, we will pass engine.error to ChatInput to show a non-blocking alert
-
     if (!engine.card || !engine.preset) {
         return (
             <div className="flex flex-col justify-center items-center h-full gap-4 text-amber-400 bg-slate-900">
@@ -125,7 +122,6 @@ export const ChatTester: React.FC<ChatTesterProps> = ({ sessionId, onBack }) => 
         <ChatLayout isImmersive={ui.isImmersive} globalClass={engine.visualState.globalClass}>
             <VisualLayer visualState={engine.visualState} isImmersive={ui.isImmersive} />
             
-            {/* NEW: Persistent RPG Notification Overlay */}
             <RpgNotificationOverlay />
 
             <ChatHeader 
@@ -178,6 +174,8 @@ export const ChatTester: React.FC<ChatTesterProps> = ({ sessionId, onBack }) => 
                 onOpenAuthorNote={() => ui.setIsAuthorNoteOpen(true)}
                 onOpenWorldInfo={() => ui.setIsWorldInfoOpen(true)}
                 
+                onArenaSelect={engine.handleArenaSelection} // WIRED HERE
+
                 scripts={engine.card.extensions?.TavernHelper_scripts || []}
                 variables={engine.variables}
                 extensionSettings={engine.extensionSettings}
@@ -201,18 +199,16 @@ export const ChatTester: React.FC<ChatTesterProps> = ({ sessionId, onBack }) => 
                 isAutoLooping={engine.isAutoLooping} 
                 onToggleAutoLoop={() => engine.setIsAutoLooping(!engine.isAutoLooping)} 
                 queueLength={engine.queueLength} 
-                // STORY MODE PROPS
                 isStoryMode={engine.isStoryMode}
                 storyQueueLength={engine.storyQueue ? engine.storyQueue.length : 0}
                 onNextStoryChunk={engine.advanceStoryChunk}
                 onCancelStoryMode={engine.cancelStoryMode}
-                // ERROR HANDLING
-                error={engine.error} // Pass error string
-                onClearError={() => engine.setError(null)} // Pass clear handler
+                error={engine.error} 
+                onClearError={() => engine.setError(null)} 
             >
                 <DebugPanel 
                     logs={engine.logs} 
-                    messages={engine.messages} // FIX: Pass full messages history for reconstruction
+                    messages={engine.messages} 
                     onClearLogs={engine.clearLogs} 
                     onInspectState={() => ui.setIsHUDOpen(true)} 
                     onCopyLogs={() => {}} 
@@ -220,7 +216,7 @@ export const ChatTester: React.FC<ChatTesterProps> = ({ sessionId, onBack }) => 
                     isImmersive={ui.isImmersive}
                     onLorebookCreatorOpen={() => ui.setIsLorebookCreatorOpen(true)}
                     summaryStats={{
-                        messageCount: activeTurnCount, // FIX: Pass Active Turns calculated from Global Settings
+                        messageCount: activeTurnCount, 
                         summaryCount: engine.longTermSummaries.length,
                         contextDepth: contextDepth,
                         chunkSize: chunkSize,
@@ -255,7 +251,7 @@ export const ChatTester: React.FC<ChatTesterProps> = ({ sessionId, onBack }) => 
                     sessionId,
                     extensionSettings: engine.extensionSettings,
                     interactiveError: engine.interactiveError,
-                    generatedLorebookEntries: engine.generatedLorebookEntries // NEW
+                    generatedLorebookEntries: engine.generatedLorebookEntries 
                 }}
                 actions={{
                     updateAuthorNote: engine.updateAuthorNote,

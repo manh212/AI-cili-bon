@@ -3,13 +3,16 @@ import React, { useState, useEffect, useRef } from 'react';
 import type { VisualState } from '../../types';
 import { usePreset } from '../../contexts/PresetContext';
 import { useTTS } from '../../contexts/TTSContext';
+import { useChatStore } from '../../store/chatStore'; // Import Store for Arena State
 import { 
     getConnectionSettings, 
     saveConnectionSettings, 
     GlobalConnectionSettings, 
     MODEL_OPTIONS, 
     PROXY_MODEL_OPTIONS,
-    getActiveModel
+    getActiveModel,
+    getStoredProxyModels,
+    StoredProxyModel
 } from '../../services/settingsService';
 import { ToggleInput } from '../ui/ToggleInput';
 
@@ -227,11 +230,14 @@ const QuickConfigModal: React.FC<{
     const { presets } = usePreset();
     const modalRef = useRef<HTMLDivElement>(null);
     const [conn, setConn] = useState<GlobalConnectionSettings>(getConnectionSettings());
+    const [proxyModels, setProxyModels] = useState<StoredProxyModel[]>([]);
 
     // Sync state when modal opens
     useEffect(() => {
         if (isOpen) {
             setConn(getConnectionSettings());
+            const stored = getStoredProxyModels();
+            setProxyModels(stored);
         }
     }, [isOpen]);
 
@@ -270,6 +276,10 @@ const QuickConfigModal: React.FC<{
         setConn(newConn);
         onConnectionChange(); // Notify parent to update badge
     };
+
+    const currentOptions = conn.source === 'gemini' 
+        ? MODEL_OPTIONS 
+        : (proxyModels.length > 0 ? proxyModels : PROXY_MODEL_OPTIONS);
 
     return (
         <div ref={modalRef} className="absolute top-14 left-16 md:left-auto md:right-1/4 w-72 bg-slate-800 border border-slate-600 rounded-xl shadow-2xl z-50 animate-fade-in-up flex flex-col max-h-[70vh]">
@@ -317,7 +327,7 @@ const QuickConfigModal: React.FC<{
                                 onChange={handleModelChange}
                                 className="flex-grow bg-slate-900 border border-slate-600 rounded text-xs p-1.5 text-white focus:border-indigo-500 outline-none"
                             >
-                                {(conn.source === 'gemini' ? MODEL_OPTIONS : PROXY_MODEL_OPTIONS).map(m => (
+                                {currentOptions.map(m => (
                                     <option key={m.id} value={m.id}>{m.name}</option>
                                 ))}
                             </select>
@@ -485,6 +495,14 @@ export const ChatHeader: React.FC<ChatHeaderProps> = ({
     const [isConfigMenuOpen, setIsConfigMenuOpen] = useState(false);
     const [refreshKey, setRefreshKey] = useState(0); // To force re-render of badge
     const triggerRef = useRef<HTMLButtonElement>(null);
+    
+    // Arena Mode Logic
+    const { isArenaMode, setArenaMode, arenaModelId, setArenaModelId } = useChatStore();
+    const [proxyModels, setProxyModels] = useState<StoredProxyModel[]>([]);
+
+    useEffect(() => {
+        setProxyModels(getStoredProxyModels());
+    }, [isArenaMode]);
 
     const handleCloseMenu = () => {
         setIsSettingsMenuOpen(false);
@@ -498,6 +516,13 @@ export const ChatHeader: React.FC<ChatHeaderProps> = ({
     const headerClasses = isImmersive
         ? "p-3 bg-slate-900/60 backdrop-blur-md border-b border-white/10 flex items-center gap-4 relative z-10 transition-all duration-300 hover:bg-slate-900/80"
         : "p-3 border-b border-slate-700 flex items-center gap-4 relative z-10 bg-slate-800/80 backdrop-blur-md";
+
+    // Combine models for Arena Selector
+    const allArenaModels = [
+        ...MODEL_OPTIONS,
+        ...proxyModels,
+        ...PROXY_MODEL_OPTIONS
+    ];
 
     return (
         <div className={headerClasses}>
@@ -516,12 +541,37 @@ export const ChatHeader: React.FC<ChatHeaderProps> = ({
                     <h2 className="text-lg font-bold text-slate-200 truncate">{characterName}</h2>
                 </div>
                 {!isImmersive && (
-                    <div className="flex">
+                    <div className="flex items-center gap-3">
                         <UnifiedConfigBadge 
                             presetName={activePresetName} 
                             onClick={() => onPresetChange && setIsConfigMenuOpen(!isConfigMenuOpen)}
                             refreshKey={refreshKey}
                         />
+                        {/* Arena Mode Toggle */}
+                        <div className="flex items-center gap-2 bg-slate-900/50 rounded-full px-2 py-0.5 border border-slate-700">
+                             <button
+                                onClick={() => setArenaMode(!isArenaMode)}
+                                className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded transition-colors ${isArenaMode ? 'bg-rose-600 text-white shadow-sm' : 'text-slate-500 hover:text-slate-300'}`}
+                                title={isArenaMode ? "Tắt chế độ Đấu trường" : "Bật chế độ Đấu trường (So sánh Model)"}
+                             >
+                                VS
+                             </button>
+                             
+                             {isArenaMode && (
+                                <select
+                                    value={arenaModelId || ''}
+                                    onChange={(e) => setArenaModelId(e.target.value)}
+                                    className="bg-transparent text-[10px] text-rose-300 font-medium outline-none max-w-[100px]"
+                                    title="Chọn Model Đối thủ"
+                                >
+                                    <option value="" className="bg-slate-800">Chọn Đối thủ</option>
+                                    {allArenaModels.map((m, idx) => (
+                                        <option key={`${m.id}-${idx}`} value={m.id} className="bg-slate-800">{m.name}</option>
+                                    ))}
+                                </select>
+                             )}
+                        </div>
+
                          {/* Quick Config Modal attached to the badge area */}
                          <div className="relative">
                             <QuickConfigModal 

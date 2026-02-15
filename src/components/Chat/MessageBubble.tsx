@@ -111,6 +111,104 @@ export const ThinkingReveal: React.FC<{ content: string; label?: string }> = ({ 
     );
 };
 
+// --- RENDER CONTENT HELPER (Reused in Arena) ---
+const RenderedArenaContent: React.FC<{ content: string }> = ({ content }) => {
+    const { mainHtml, thinkingBlocks } = useMemo(() => {
+        if (!content) return { mainHtml: '', thinkingBlocks: [] };
+
+        const foundThinkingBlocks: { label: string; content: string }[] = [];
+        const thinkingRegex = /<(thinking|thinking_requirements|step_outline|plan)>([\s\S]*?)<\/\1>/gi;
+        
+        let match;
+        let extractedContent = content;
+        while ((match = thinkingRegex.exec(content)) !== null) {
+            const tagName = match[1];
+            const innerContent = match[2].trim();
+            
+            let label = 'Suy nghĩ';
+            if (tagName === 'thinking_requirements') label = 'Yêu cầu Suy nghĩ';
+            if (tagName === 'step_outline') label = 'Dàn ý Bước đi';
+            if (tagName === 'plan') label = 'Kế hoạch';
+
+            foundThinkingBlocks.push({ label, content: innerContent });
+            extractedContent = extractedContent.replace(match[0], '');
+        }
+
+        const rawHtml = marked.parse(extractedContent.trim()) as string;
+        const sanitized = DOMPurify.sanitize(rawHtml, { 
+            ADD_TAGS: ['style', 'details', 'summary'],
+            ADD_ATTR: ['style', 'class', 'open']
+        });
+        
+        return { mainHtml: sanitized, thinkingBlocks: foundThinkingBlocks };
+    }, [content]);
+
+    if (!content) {
+        return <span className="animate-pulse opacity-50">Đang viết...</span>;
+    }
+
+    return (
+        <>
+            {thinkingBlocks.map((block, idx) => (
+                <ThinkingReveal key={idx} content={block.content} label={block.label} />
+            ))}
+            <div
+                className="markdown-content"
+                dangerouslySetInnerHTML={{ __html: mainHtml }}
+            />
+        </>
+    );
+};
+
+// --- ARENA BUBBLE (SPLIT VIEW) ---
+const ArenaBubble: React.FC<{
+    message: ChatMessage;
+    onSelect: (selection: 'A' | 'B') => void;
+}> = ({ message, onSelect }) => {
+    if (!message.arena) return null;
+
+    const renderColumn = (modelName: string, content: string, selection: 'A' | 'B', colorClass: string) => (
+        <div className="flex-1 flex flex-col min-w-0 bg-slate-900/40 rounded-lg border border-slate-700/50 overflow-hidden">
+            {/* Header */}
+            <div className={`px-3 py-2 text-xs font-bold uppercase tracking-wider border-b border-slate-700/50 flex justify-between items-center ${colorClass} bg-opacity-10`}>
+                <span className="truncate max-w-[120px]" title={modelName}>{modelName}</span>
+                {selection === 'B' && <span className="text-[10px] opacity-70">Challenger</span>}
+            </div>
+            
+            {/* Content */}
+            <div className="p-3 text-sm text-slate-300 leading-relaxed flex-grow overflow-y-auto max-h-[400px] custom-scrollbar">
+                <RenderedArenaContent content={content} />
+            </div>
+            
+            {/* Action */}
+            <div className="p-2 border-t border-slate-700/50 bg-slate-800/30">
+                <button
+                    onClick={() => onSelect(selection)}
+                    className={`w-full py-1.5 rounded text-xs font-bold transition-all active:scale-95 ${colorClass} hover:brightness-110 shadow-sm`}
+                >
+                    Chọn cái này
+                </button>
+            </div>
+        </div>
+    );
+
+    return (
+        <div className="w-full max-w-4xl mx-auto my-4">
+            <div className="flex items-center justify-center mb-2">
+                <span className="bg-rose-600 text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-sm animate-pulse">
+                    ARENA MODE
+                </span>
+            </div>
+            
+            <div className="flex flex-col sm:flex-row gap-3">
+                {renderColumn(message.arena.modelA.name, message.arena.modelA.content, 'A', 'bg-sky-600 text-white')}
+                <div className="hidden sm:flex items-center justify-center text-slate-500 font-bold text-xs">VS</div>
+                {renderColumn(message.arena.modelB.name, message.arena.modelB.content, 'B', 'bg-purple-600 text-white')}
+            </div>
+        </div>
+    );
+};
+
 interface MessageBubbleProps {
     message: ChatMessage;
     avatarUrl: string | null;
@@ -122,6 +220,7 @@ interface MessageBubbleProps {
     menuActions: MessageMenuAction[];
     isImmersive: boolean;
     isStreaming?: boolean; // NEW PROP: Flag for raw streaming
+    onArenaSelect?: (id: string, selection: 'A' | 'B') => void;
 }
 
 const MessageBubbleComponent: React.FC<MessageBubbleProps> = ({ 
@@ -134,7 +233,8 @@ const MessageBubbleComponent: React.FC<MessageBubbleProps> = ({
     onCancel, 
     menuActions, 
     isImmersive,
-    isStreaming = false 
+    isStreaming = false,
+    onArenaSelect
 }) => {
     const { activePersona } = useUserPersona();
     const { showToast } = useToast();
@@ -154,10 +254,13 @@ const MessageBubbleComponent: React.FC<MessageBubbleProps> = ({
     const ttsRate = ttsSettings.tts_rate ?? 1;
     const ttsPitch = ttsSettings.tts_pitch ?? 1;
 
+    // Check for active Arena Mode state
+    const isArenaActive = message.arena && message.arena.enabled && message.arena.selected === null;
+
     const { mainHtml, thinkingBlocks } = useMemo(() => {
         // PERFORMANCE OPTIMIZATION:
-        // If streaming, skip heavy parsing completely. Return placeholders.
-        if (isUser || !message.content || isStreaming) {
+        // If streaming OR Arena Active, skip heavy parsing completely. Return placeholders.
+        if (isUser || !message.content || isStreaming || isArenaActive) {
             return { mainHtml: '', thinkingBlocks: [] };
         }
 
@@ -191,7 +294,7 @@ const MessageBubbleComponent: React.FC<MessageBubbleProps> = ({
         });
         
         return { mainHtml: sanitized, thinkingBlocks: foundThinkingBlocks };
-    }, [isUser, message.content, activePersona, isStreaming]); // Added isStreaming to dependencies
+    }, [isUser, message.content, activePersona, isStreaming, isArenaActive]); // Added isStreaming to dependencies
     
     useEffect(() => {
         if (isEditing && textareaRef.current) {
@@ -253,6 +356,17 @@ const MessageBubbleComponent: React.FC<MessageBubbleProps> = ({
         );
     }
 
+    // --- ARENA MODE RENDER ---
+    if (isArenaActive) {
+        return (
+            <ArenaBubble 
+                message={message} 
+                onSelect={(sel) => onArenaSelect && onArenaSelect(message.id, sel)} 
+            />
+        );
+    }
+
+    // --- STANDARD RENDER ---
     return (
         <div className={`flex items-end gap-2 my-4 group ${isUser ? 'flex-row-reverse' : 'flex-row'}`}>
              <div className="flex-shrink-0 self-center opacity-0 group-hover:opacity-100 transition-opacity duration-200">
@@ -348,6 +462,11 @@ export const MessageBubble = memo(MessageBubbleComponent, (prev, next) => {
         prev.avatarUrl === next.avatarUrl &&
         prev.isImmersive === next.isImmersive &&
         prev.isStreaming === next.isStreaming && // Important: Re-render if streaming state changes
+        // NEW: Check Arena State changes
+        prev.message.arena?.modelA.content === next.message.arena?.modelA.content &&
+        prev.message.arena?.modelB.content === next.message.arena?.modelB.content &&
+        prev.message.arena?.selected === next.message.arena?.selected &&
+        
         compareMenuActions(prev.menuActions, next.menuActions)
     );
 });

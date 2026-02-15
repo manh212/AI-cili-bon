@@ -5,6 +5,21 @@ import type { VisualState, WorldInfoRuntimeStats, SummaryQueueItem, ChatTurnLog,
 import type { WorldInfoEntry } from './character';
 import type { RPGDatabase, RpgSnapshot } from './rpg';
 
+export interface ArenaState {
+    enabled: boolean;
+    modelA: {
+        name: string;
+        content: string;
+        thinking?: string; // Optional thinking block storage
+    };
+    modelB: {
+        name: string;
+        content: string;
+        thinking?: string;
+    };
+    selected: 'A' | 'B' | null; // Null means waiting for user selection
+}
+
 export interface ChatMessage {
     id: string;
     role: 'user' | 'model' | 'system';
@@ -25,6 +40,9 @@ export interface ChatMessage {
     
     // --- SNAPSHOT SYSTEM ---
     rpgSnapshot?: RpgSnapshot;
+
+    // --- ARENA MODE DATA ---
+    arena?: ArenaState;
 }
 
 export interface ChatSession {

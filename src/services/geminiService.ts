@@ -18,22 +18,27 @@ const safetySettings = [
  */
 export async function sendChatRequest(
     fullPrompt: string,
-    settings: SillyTavernPreset
+    settings: SillyTavernPreset,
+    overrideModel?: string // New Parameter
 ): Promise<{ response: GenerateContentResponse }> {
     const connection = getConnectionSettings();
     const source = connection.source;
 
+    // Use override model if provided, else fall back to connection settings
+    const targetModel = overrideModel || (source === 'gemini' ? connection.gemini_model : (source === 'proxy' ? connection.proxy_model : connection.openrouter_model));
+
     if (source === 'proxy') {
-        const text = await callProxy(connection.proxy_model, fullPrompt, settings);
+        const text = await callProxy(targetModel, fullPrompt, settings);
         return { response: { text } as GenerateContentResponse };
     }
 
     if (source === 'openrouter') {
-        const text = await callOpenRouter(connection.openrouter_model, fullPrompt, settings);
+        const text = await callOpenRouter(targetModel, fullPrompt, settings);
         return { response: { text } as GenerateContentResponse };
     }
 
-    const model = connection.gemini_model || 'gemini-3-pro-preview';
+    // Gemini Native
+    const model = targetModel || 'gemini-3-pro-preview';
     const response = await callGeminiDirect(model, fullPrompt, settings, safetySettings);
     return { response };
 }
@@ -44,14 +49,18 @@ export async function sendChatRequest(
 export async function* sendChatRequestStream(
     fullPrompt: string,
     settings: SillyTavernPreset,
-    signal?: AbortSignal // NEW: Abort Signal
+    signal?: AbortSignal, // NEW: Abort Signal
+    overrideModel?: string // NEW: Specific model for Arena mode or testing
 ): AsyncGenerator<string, void, unknown> {
     const connection = getConnectionSettings();
     const source = connection.source;
     
+    // Determine Model ID: Override > Settings
+    const targetModel = overrideModel || (source === 'gemini' ? connection.gemini_model : (source === 'proxy' ? connection.proxy_model : connection.openrouter_model));
+
     // 1. Handle Proxy Streaming
     if (source === 'proxy') {
-        const stream = callProxyStream(connection.proxy_model, fullPrompt, settings, signal);
+        const stream = callProxyStream(targetModel, fullPrompt, settings, signal);
         for await (const chunk of stream) {
             yield chunk;
         }
@@ -61,14 +70,14 @@ export async function* sendChatRequestStream(
     // 2. Handle Non-Gemini Sources (fallback for OpenRouter or others not implemented yet)
     if (source !== 'gemini') {
         if (signal?.aborted) throw new Error("Aborted");
-        const result = await sendChatRequest(fullPrompt, settings);
+        const result = await sendChatRequest(fullPrompt, settings, overrideModel);
         yield result.response.text || "";
         return;
     }
 
     // 3. Handle Gemini Native Streaming
     const ai = getGeminiClient();
-    const model = connection.gemini_model || 'gemini-3-pro-preview';
+    const model = targetModel || 'gemini-3-pro-preview';
     const payload = buildGeminiPayload(fullPrompt, settings, safetySettings);
 
     try {

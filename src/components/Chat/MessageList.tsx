@@ -4,7 +4,7 @@ import type { ChatMessage, TavernHelperScript } from '../../types';
 import { InteractiveHtmlMessage } from '../InteractiveHtmlMessage';
 import { MessageBubble, ThinkingReveal, MessageMenu } from './MessageBubble';
 import { Loader } from '../Loader';
-import { usePreset } from '../../contexts/PresetContext'; // Still needed for other preset stuff
+import { usePreset } from '../../contexts/PresetContext'; 
 import { useToast } from '../ToastSystem';
 import { cleanMessageContent } from '../../services/promptManager';
 import { useTTS } from '../../contexts/TTSContext';
@@ -84,6 +84,9 @@ interface MessageListProps {
     onOpenAuthorNote: () => void;
     onOpenWorldInfo: () => void;
     
+    // NEW: Arena Callback
+    onArenaSelect: (id: string, selection: 'A' | 'B') => void;
+
     // Data
     scripts: TavernHelperScript[];
     variables: any;
@@ -114,6 +117,7 @@ const MessageListComponent: React.FC<MessageListProps> = ({
     onDeleteMessage,
     onOpenAuthorNote,
     onOpenWorldInfo,
+    onArenaSelect, // Used here
     scripts,
     variables,
     extensionSettings,
@@ -215,10 +219,6 @@ const MessageListComponent: React.FC<MessageListProps> = ({
                 const canDelete = !isLoading;
 
                 // --- RAW STREAMING LOGIC ---
-                // Chỉ bật chế độ Raw Stream nếu:
-                // 1. Hệ thống đang tải (isLoading)
-                // 2. Đây là tin nhắn cuối cùng (isLastMessage)
-                // 3. Tin nhắn là của AI (msg.role === 'model')
                 const isStreaming = isLoading && isLastMessage && msg.role === 'model';
 
                 const menuActions = [
@@ -238,11 +238,11 @@ const MessageListComponent: React.FC<MessageListProps> = ({
                     },
                 ];
 
-                if (!msg.content.trim() && !msg.interactiveHtml && editingMessageId !== msg.id) return null;
+                if (!msg.content.trim() && !msg.interactiveHtml && !msg.arena && editingMessageId !== msg.id) return null;
 
                 return (
                     <div key={msg.id} className="group relative flex flex-col gap-2 my-4">
-                        {(msg.content.trim() || editingMessageId === msg.id) && (
+                        {(msg.content.trim() || msg.arena || editingMessageId === msg.id) && (
                             <MessageBubble 
                                 message={msg} 
                                 avatarUrl={characterAvatarUrl}
@@ -253,7 +253,8 @@ const MessageListComponent: React.FC<MessageListProps> = ({
                                 onCancel={onCancelEdit}
                                 menuActions={menuActions}
                                 isImmersive={isImmersive}
-                                isStreaming={isStreaming} // Pass the prop here
+                                isStreaming={isStreaming} 
+                                onArenaSelect={onArenaSelect} // PASSED DOWN
                             />
                         )}
 

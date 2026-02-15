@@ -280,7 +280,7 @@ export const ApiSettings: React.FC = () => {
 
     // --- PROXY PROFILE LOGIC ---
 
-    const handleProfileChange = (profileId: string) => {
+    const handleProfileChange = async (profileId: string) => {
         setActiveProfileId(profileId);
         const profile = profiles.find(p => p.id === profileId);
         if (profile) {
@@ -299,6 +299,24 @@ export const ApiSettings: React.FC = () => {
             }));
             
             showToast(`Đã tải cấu hình: ${profile.name}`, 'info');
+
+            // --- AUTO FETCH MODELS ---
+            // Trigger fetch immediately using the profile data (not state, to avoid race condition)
+            if (profile.url) {
+                setIsLoadingModels(true);
+                try {
+                    const models = await fetchProxyModels(profile.url, profile.password, profile.legacyMode);
+                    setProxyModelList(models);
+                    saveStoredProxyModels(models);
+                    // Optional: Notification for auto-fetch success
+                    // showToast(`Đã cập nhật danh sách model (${models.length})`, 'success');
+                } catch (e: any) {
+                    console.error("Auto-fetch error:", e);
+                    showToast(`Không thể tự động tải danh sách model: ${e.message}`, 'warning');
+                } finally {
+                    setIsLoadingModels(false);
+                }
+            }
         }
     };
 

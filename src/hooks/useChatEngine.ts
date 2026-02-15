@@ -21,7 +21,17 @@ export const useChatEngine = (sessionId: string | null) => {
     const { saveSession, changePreset } = useChatSession(sessionId);
     
     // sendMessage now supports forcedContent for Story Mode
-    const { sendMessage, stopGeneration, interactiveError, handleUserDecision, manualMythicTrigger, processAIResponse } = useChatFlow(); 
+    // Exposed handleArenaSelection for Arena Mode
+    const { 
+        sendMessage, 
+        stopGeneration, 
+        interactiveError, 
+        handleUserDecision, 
+        manualMythicTrigger, 
+        processAIResponse,
+        handleArenaSelection 
+    } = useChatFlow(); 
+
     const { 
         isSummarizing, 
         triggerSmartContext, 
@@ -88,16 +98,9 @@ export const useChatEngine = (sessionId: string | null) => {
     }, [store.storyQueue, store.isLoading, isSummarizing, sendMessage, saveSession, store.setStoryQueue]); // Reduced dependencies
 
     // --- GLOBAL WATCHER: AUTO SUMMARIZATION ---
-    // Tự động theo dõi số lượt tin nhắn để kích hoạt tóm tắt
-    // Hoạt động cho cả Chat thường và Story Mode
     useEffect(() => {
-        // Chỉ chạy khi:
-        // 1. Không đang tải (để đảm bảo tin nhắn cuối cùng đã hoàn tất)
-        // 2. Không đang tóm tắt (tránh lặp)
-        // 3. Có preset (để lấy cấu hình - though now we use Global)
         if (store.isLoading || isSummarizing || !store.preset) return;
 
-        // FETCH FROM GLOBAL SETTINGS NOW
         const globalSettings = getGlobalContextSettings();
         const contextLimit = globalSettings.context_depth || 24;
         const chunkSize = globalSettings.summarization_chunk_size || 10;
@@ -106,13 +109,12 @@ export const useChatEngine = (sessionId: string | null) => {
         const summarizedTurns = store.longTermSummaries.length * chunkSize;
         const activeTurnCount = Math.max(0, totalTurns - summarizedTurns);
 
-        // Nếu vượt quá giới hạn -> Tự động gọi tóm tắt
         if (activeTurnCount >= contextLimit) {
             triggerSmartContext();
         }
 
     }, [
-        store.messages.length, // Chỉ chạy khi số lượng tin nhắn thay đổi (bot trả lời xong)
+        store.messages.length,
         store.isLoading, 
         isSummarizing, 
         store.preset, 
@@ -121,25 +123,19 @@ export const useChatEngine = (sessionId: string | null) => {
     ]);
 
 
-    // --- AUTO LOOP LOGIC (Story Mode - Synchronized) ---
+    // --- AUTO LOOP LOGIC ---
     useEffect(() => {
         let timer: ReturnType<typeof setTimeout>;
-        
-        // Điều kiện chạy Auto Loop:
-        // 1. Phải đang bật AutoLoop và là Story Mode.
-        // 2. KHÔNG đang tải (Loading) -> Chờ sendMessage/RPG xử lý xong.
-        // 3. KHÔNG đang tóm tắt (Summarizing) -> Chờ bộ nhớ xử lý xong (QUAN TRỌNG).
-        // 4. Không có lỗi.
         if (isAutoLooping && !store.isLoading && !isSummarizing && !store.error && isStoryMode) {
             timer = setTimeout(() => {
                 advanceStoryChunk();
-            }, 1000); // Fixed delay 1s
+            }, 1000); 
         }
         return () => clearTimeout(timer);
     }, [isAutoLooping, store.isLoading, isSummarizing, store.error, isStoryMode, advanceStoryChunk]);
 
 
-    // --- REGENERATE LOGIC (SAFE STATE ROLLBACK) ---
+    // --- REGENERATE LOGIC ---
     const regenerateLastResponse = useCallback(async () => {
         const msgs = store.messages;
         if (msgs.length === 0 || store.isLoading) return;
@@ -150,17 +146,11 @@ export const useChatEngine = (sessionId: string | null) => {
 
         const lastMsg = msgs[msgs.length - 1];
 
-        // Case 1: Last message is AI. We need to find the user message before it.
         if (lastMsg.role === 'model') {
-            
-            // --- NEW: EXTRACT ACTIVE UIDS BEFORE DELETING ---
-            // This is the key optimization: Re-use the UIDs from the turn we are about to destroy.
             if (lastMsg.activeLorebookUids && lastMsg.activeLorebookUids.length > 0) {
                 forceActiveUids = lastMsg.activeLorebookUids;
                 logger.logSystemMessage('state', 'system', `[Regenerate] Snapshot found! Will reuse ${forceActiveUids.length} active entries (Skip Scan).`);
             }
-            // ------------------------------------------------
-
             if (msgs.length >= 2) {
                 const prev = msgs[msgs.length - 2];
                 if (prev.role === 'user') {
@@ -169,17 +159,13 @@ export const useChatEngine = (sessionId: string | null) => {
                 }
             }
         } 
-        // Case 2: Last message is User (e.g., error case or manual stop).
         else if (lastMsg.role === 'user') {
             targetUserMsgId = lastMsg.id;
             textToSend = lastMsg.content;
         }
 
         if (targetUserMsgId && textToSend) {
-            // 1. Rollback State (Variables, RPG, etc.) to BEFORE the user message
             await deleteMessage(targetUserMsgId);
-            // 2. Re-send the message to trigger new generation
-            // Pass the extracted UIDs to force reuse
             await sendMessage(textToSend, { forceActiveUids });
         } else {
             console.warn("Could not find a valid user message to regenerate from.");
@@ -215,8 +201,9 @@ export const useChatEngine = (sessionId: string | null) => {
         executeSlashCommands,
         handleUserDecision, 
         handleRetryMythic: manualMythicTrigger,
-        cancelStoryMode: store.clearStoryQueue, // Expose cancellation
-        setError: store.setError, // EXPOSED: Allow UI to clear error manually
+        cancelStoryMode: store.clearStoryQueue, 
+        setError: store.setError,
+        handleArenaSelection, // EXPORTED FOR CHAT TESTER
         
         // Specific Setters
         setIsAutoLooping,
@@ -228,7 +215,6 @@ export const useChatEngine = (sessionId: string | null) => {
             store.setSessionData({ visualState: { ...store.visualState, [type]: value } }),
         clearLogs: logger.clearLogs,
         
-        // Story Mode Actions
         advanceStoryChunk
     };
 };
