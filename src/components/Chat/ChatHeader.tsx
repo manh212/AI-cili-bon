@@ -517,12 +517,24 @@ export const ChatHeader: React.FC<ChatHeaderProps> = ({
         ? "p-3 bg-slate-900/60 backdrop-blur-md border-b border-white/10 flex items-center gap-4 relative z-10 transition-all duration-300 hover:bg-slate-900/80"
         : "p-3 border-b border-slate-700 flex items-center gap-4 relative z-10 bg-slate-800/80 backdrop-blur-md";
 
-    // Combine models for Arena Selector
-    const allArenaModels = [
-        ...MODEL_OPTIONS,
-        ...proxyModels,
-        ...PROXY_MODEL_OPTIONS
-    ];
+    // --- ARENA MODEL SELECTION LOGIC (Option A) ---
+    // Only show models compatible with current source
+    const connection = getConnectionSettings();
+    let arenaModelOptions: { id: string, name: string }[] = [];
+
+    if (connection.source === 'gemini') {
+        arenaModelOptions = MODEL_OPTIONS;
+    } else if (connection.source === 'proxy') {
+        // Dedup proxy models + default options
+        const combined = [...proxyModels, ...PROXY_MODEL_OPTIONS];
+        const unique = new Map<string, {id: string, name: string}>();
+        combined.forEach(m => unique.set(m.id, m));
+        arenaModelOptions = Array.from(unique.values());
+    } else {
+         // Fallback for OpenRouter etc: Use Proxy Options list + Defaults as best guess
+         // Since fetching OR models is async in settings, we keep it simple here.
+         arenaModelOptions = PROXY_MODEL_OPTIONS;
+    }
 
     return (
         <div className={headerClasses}>
@@ -562,10 +574,10 @@ export const ChatHeader: React.FC<ChatHeaderProps> = ({
                                     value={arenaModelId || ''}
                                     onChange={(e) => setArenaModelId(e.target.value)}
                                     className="bg-transparent text-[10px] text-rose-300 font-medium outline-none max-w-[100px]"
-                                    title="Chọn Model Đối thủ"
+                                    title="Chọn Model Đối thủ (Cùng nguồn)"
                                 >
                                     <option value="" className="bg-slate-800">Chọn Đối thủ</option>
-                                    {allArenaModels.map((m, idx) => (
+                                    {arenaModelOptions.map((m, idx) => (
                                         <option key={`${m.id}-${idx}`} value={m.id} className="bg-slate-800">{m.name}</option>
                                     ))}
                                 </select>

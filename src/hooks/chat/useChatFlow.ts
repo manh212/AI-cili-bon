@@ -399,8 +399,11 @@ export const useChatFlow = () => {
                                 slotContent += chunk;
                                 const currentMsg = useChatStore.getState().messages.find(m => m.id === aiMsg.id);
                                 if (currentMsg && currentMsg.arena) {
-                                    const newArena = { ...currentMsg.arena };
-                                    newArena[slot].content = slotContent;
+                                    // FIX: Deep Copy Arena Object to allow mutation on read-only store object
+                                    const newArena = { 
+                                        ...currentMsg.arena,
+                                        [slot]: { ...currentMsg.arena[slot], content: slotContent }
+                                    };
                                     state.updateMessage(aiMsg.id, { arena: newArena });
                                 }
                             }
@@ -408,8 +411,10 @@ export const useChatFlow = () => {
                              // Independent error handling for each slot
                              const currentMsg = useChatStore.getState().messages.find(m => m.id === aiMsg.id);
                              if (currentMsg && currentMsg.arena) {
-                                 const newArena = { ...currentMsg.arena };
-                                 newArena[slot].content = `[Lỗi: ${e.message}]`;
+                                 const newArena = { 
+                                     ...currentMsg.arena,
+                                     [slot]: { ...currentMsg.arena[slot], content: `[Lỗi: ${e.message}]` }
+                                 };
                                  state.updateMessage(aiMsg.id, { arena: newArena });
                              }
                         }
