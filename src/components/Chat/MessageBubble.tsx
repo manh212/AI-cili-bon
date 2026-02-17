@@ -112,7 +112,16 @@ export const ThinkingReveal: React.FC<{ content: string; label?: string }> = ({ 
 };
 
 // --- RENDER CONTENT HELPER (Reused in Arena) ---
-const RenderedArenaContent: React.FC<{ content: string }> = ({ content }) => {
+const RenderedArenaContent: React.FC<{ content: string; isStreaming?: boolean }> = ({ content, isStreaming }) => {
+    // OPTIMIZATION: Nếu đang streaming, trả về text thô ngay lập tức để tránh lag do parse markdown liên tục
+    if (isStreaming) {
+        return (
+            <div className="whitespace-pre-wrap font-sans text-sm leading-relaxed">
+                {content}<span className="animate-pulse text-sky-400">▍</span>
+            </div>
+        );
+    }
+
     const { mainHtml, thinkingBlocks } = useMemo(() => {
         if (!content) return { mainHtml: '', thinkingBlocks: [] };
 
@@ -144,7 +153,7 @@ const RenderedArenaContent: React.FC<{ content: string }> = ({ content }) => {
     }, [content]);
 
     if (!content) {
-        return <span className="animate-pulse opacity-50">Đang viết...</span>;
+        return <span className="animate-pulse opacity-50">Đang khởi tạo...</span>;
     }
 
     return (
@@ -160,37 +169,64 @@ const RenderedArenaContent: React.FC<{ content: string }> = ({ content }) => {
     );
 };
 
-// --- ARENA BUBBLE (SPLIT VIEW) ---
-const ArenaBubble: React.FC<{
-    message: ChatMessage;
+// --- ARENA COLUMN (ISOLATED COMPONENT) ---
+// This ensures that when Model B streams, Model A doesn't re-render.
+interface ArenaColumnProps {
+    modelData: { name: string; content: string; completed?: boolean };
+    selection: 'A' | 'B';
+    colorClass: string;
     onSelect: (selection: 'A' | 'B') => void;
-}> = ({ message, onSelect }) => {
-    if (!message.arena) return null;
+}
 
-    const renderColumn = (modelName: string, content: string, selection: 'A' | 'B', colorClass: string) => (
+const ArenaColumn = memo(({ modelData, selection, colorClass, onSelect }: ArenaColumnProps) => {
+    // Independent streaming state logic
+    const isModelStreaming = modelData.completed === false;
+
+    return (
         <div className="flex-1 flex flex-col min-w-0 bg-slate-900/40 rounded-lg border border-slate-700/50 overflow-hidden">
             {/* Header */}
             <div className={`px-3 py-2 text-xs font-bold uppercase tracking-wider border-b border-slate-700/50 flex justify-between items-center ${colorClass} bg-opacity-10`}>
-                <span className="truncate max-w-[120px]" title={modelName}>{modelName}</span>
+                <span className="truncate max-w-[120px]" title={modelData.name}>{modelData.name}</span>
                 {selection === 'B' && <span className="text-[10px] opacity-70">Challenger</span>}
             </div>
             
             {/* Content */}
             <div className="p-3 text-sm text-slate-300 leading-relaxed flex-grow overflow-y-auto max-h-[400px] custom-scrollbar">
-                <RenderedArenaContent content={content} />
+                <RenderedArenaContent content={modelData.content} isStreaming={isModelStreaming} />
             </div>
             
             {/* Action */}
             <div className="p-2 border-t border-slate-700/50 bg-slate-800/30">
                 <button
                     onClick={() => onSelect(selection)}
-                    className={`w-full py-1.5 rounded text-xs font-bold transition-all active:scale-95 ${colorClass} hover:brightness-110 shadow-sm`}
+                    disabled={isModelStreaming}
+                    className={`w-full py-1.5 rounded text-xs font-bold transition-all active:scale-95 ${colorClass} hover:brightness-110 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed`}
                 >
-                    Chọn cái này
+                    {isModelStreaming ? 'Đang tạo...' : 'Chọn cái này'}
                 </button>
             </div>
         </div>
     );
+}, (prev, next) => {
+    // Custom comparison for memoization
+    // Only re-render if:
+    // 1. Content changes
+    // 2. Completion status changes
+    // 3. Name changes (rare, but possible on init)
+    return (
+        prev.modelData.content === next.modelData.content &&
+        prev.modelData.completed === next.modelData.completed &&
+        prev.modelData.name === next.modelData.name &&
+        prev.selection === next.selection // Should be constant but good to check
+    );
+});
+
+// --- ARENA BUBBLE (SPLIT VIEW) ---
+const ArenaBubble: React.FC<{
+    message: ChatMessage;
+    onSelect: (selection: 'A' | 'B') => void;
+}> = ({ message, onSelect }) => {
+    if (!message.arena) return null;
 
     return (
         <div className="w-full max-w-4xl mx-auto my-4">
@@ -201,9 +237,19 @@ const ArenaBubble: React.FC<{
             </div>
             
             <div className="flex flex-col sm:flex-row gap-3">
-                {renderColumn(message.arena.modelA.name, message.arena.modelA.content, 'A', 'bg-sky-600 text-white')}
+                <ArenaColumn 
+                    modelData={message.arena.modelA} 
+                    selection="A" 
+                    colorClass="bg-sky-600 text-white" 
+                    onSelect={onSelect} 
+                />
                 <div className="hidden sm:flex items-center justify-center text-slate-500 font-bold text-xs">VS</div>
-                {renderColumn(message.arena.modelB.name, message.arena.modelB.content, 'B', 'bg-purple-600 text-white')}
+                <ArenaColumn 
+                    modelData={message.arena.modelB} 
+                    selection="B" 
+                    colorClass="bg-purple-600 text-white" 
+                    onSelect={onSelect} 
+                />
             </div>
         </div>
     );
@@ -219,7 +265,7 @@ interface MessageBubbleProps {
     onCancel: () => void;
     menuActions: MessageMenuAction[];
     isImmersive: boolean;
-    isStreaming?: boolean; // NEW PROP: Flag for raw streaming
+    isStreaming?: boolean; // Flag for raw streaming (Standard mode)
     onArenaSelect?: (id: string, selection: 'A' | 'B') => void;
 }
 
@@ -294,7 +340,7 @@ const MessageBubbleComponent: React.FC<MessageBubbleProps> = ({
         });
         
         return { mainHtml: sanitized, thinkingBlocks: foundThinkingBlocks };
-    }, [isUser, message.content, activePersona, isStreaming, isArenaActive]); // Added isStreaming to dependencies
+    }, [isUser, message.content, activePersona, isStreaming, isArenaActive]); 
     
     useEffect(() => {
         if (isEditing && textareaRef.current) {
@@ -361,7 +407,7 @@ const MessageBubbleComponent: React.FC<MessageBubbleProps> = ({
         return (
             <ArenaBubble 
                 message={message} 
-                onSelect={(sel) => onArenaSelect && onArenaSelect(message.id, sel)} 
+                onSelect={(sel) => onArenaSelect && onArenaSelect(message.id, sel)}
             />
         );
     }
@@ -465,6 +511,8 @@ export const MessageBubble = memo(MessageBubbleComponent, (prev, next) => {
         // NEW: Check Arena State changes
         prev.message.arena?.modelA.content === next.message.arena?.modelA.content &&
         prev.message.arena?.modelB.content === next.message.arena?.modelB.content &&
+        prev.message.arena?.modelA.completed === next.message.arena?.modelA.completed && // Check completion A
+        prev.message.arena?.modelB.completed === next.message.arena?.modelB.completed && // Check completion B
         prev.message.arena?.selected === next.message.arena?.selected &&
         
         compareMenuActions(prev.menuActions, next.menuActions)

@@ -11,11 +11,13 @@ export interface ArenaState {
         name: string;
         content: string;
         thinking?: string; // Optional thinking block storage
+        completed?: boolean; // Track if this specific model has finished generating
     };
     modelB: {
         name: string;
         content: string;
         thinking?: string;
+        completed?: boolean; // Track if this specific model has finished generating
     };
     selected: 'A' | 'B' | null; // Null means waiting for user selection
 }

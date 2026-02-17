@@ -363,8 +363,9 @@ export const useChatFlow = () => {
                 
                 aiMsg.arena = {
                     enabled: true,
-                    modelA: { name: modelA_ID || 'Model A', content: '' },
-                    modelB: { name: freshState.arenaModelId, content: '' },
+                    // Initialize completed: false for independent tracking
+                    modelA: { name: modelA_ID || 'Model A', content: '', completed: false },
+                    modelB: { name: freshState.arenaModelId, content: '', completed: false },
                     selected: null
                 };
                 aiMsg.content = ""; // Empty content until selection
@@ -397,9 +398,9 @@ export const useChatFlow = () => {
                             for await (const chunk of stream) {
                                 if (ac.signal.aborted) break;
                                 slotContent += chunk;
+                                // Need to get fresh message state to preserve other slot's data
                                 const currentMsg = useChatStore.getState().messages.find(m => m.id === aiMsg.id);
                                 if (currentMsg && currentMsg.arena) {
-                                    // FIX: Deep Copy Arena Object to allow mutation on read-only store object
                                     const newArena = { 
                                         ...currentMsg.arena,
                                         [slot]: { ...currentMsg.arena[slot], content: slotContent }
@@ -408,7 +409,6 @@ export const useChatFlow = () => {
                                 }
                             }
                         } catch (e: any) {
-                             // Independent error handling for each slot
                              const currentMsg = useChatStore.getState().messages.find(m => m.id === aiMsg.id);
                              if (currentMsg && currentMsg.arena) {
                                  const newArena = { 
@@ -417,9 +417,21 @@ export const useChatFlow = () => {
                                  };
                                  state.updateMessage(aiMsg.id, { arena: newArena });
                              }
+                        } finally {
+                            // --- INDEPENDENT COMPLETION ---
+                            // Mark this specific slot as completed so it can render markdown immediately
+                            const currentMsg = useChatStore.getState().messages.find(m => m.id === aiMsg.id);
+                            if (currentMsg && currentMsg.arena) {
+                                const newArena = { 
+                                    ...currentMsg.arena,
+                                    [slot]: { ...currentMsg.arena[slot], completed: true }
+                                };
+                                state.updateMessage(aiMsg.id, { arena: newArena });
+                            }
                         }
                     };
 
+                    // Run both independently
                     await Promise.all([
                         runStream(modelA_ID, 'modelA'),
                         runStream(modelB_ID, 'modelB')

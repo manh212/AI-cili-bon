@@ -195,7 +195,7 @@ const MessageListComponent: React.FC<MessageListProps> = ({
         <div 
             ref={containerRef}
             className={`flex-grow p-4 md:p-6 overflow-y-auto custom-scrollbar relative z-10 w-full ${isImmersive ? 'max-w-5xl mx-auto transition-all' : ''}`}
-            aria-live="polite"
+            // REMOVED: aria-live="polite" to prevent full container updates from interrupting screen readers during streaming
         >
             {hasMoreMessages && (
                 <div className="flex justify-center mb-4">
